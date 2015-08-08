@@ -8,6 +8,7 @@ import Numeric.Natural
 import Data.Data (Data,Typeable)
 import GHC.Generics (Generic)
 import Data.Set
+import VerdiRaft.RaftData as RD
 
 newtype Term = Term { unTerm :: Natural } deriving (Eq,Ord, Show)
 
@@ -52,12 +53,28 @@ data ServerType = Follower | Candidate | Leader
 findAtIndex :: [Entry] -> LogIndex -> Maybe Entry
 findAtIndex [] _ = Nothing
 findAtIndex (e:es)  i  | eIndex e ==  i = Just e
-                       | eIndex < i = Nothing
+                       | eIndex e  < i = Nothing
                        | otherwise = findAtIndex es i
 
 findGtIndex :: [Entry] -> LogIndex -> [Entry]
 findGtIndex [] i = []
-findGtIndex (e:es) i |
+findGtIndex (e:es) i | eIndex e > i = e : findGtIndex es i
+                     | otherwise = []
+
+removeAfterIndex :: [Entry] -> LogIndex  -> [Entry]
+removeAfterIndex  = undefined
+
+maxIndex :: [Entry] -> LogIndex
+maxIndex  [] = LogIndex 0
+maxIndex (e:es) = eIndex e
+
+maxTerm :: [Entry] -> Term
+maxTerm [] = Term 0
+maxTerm  (e:es) =  eTerm e
+
+
+
+advanceCurrentTerm  =undefined
 
 
 
