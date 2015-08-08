@@ -5,8 +5,8 @@
 module VerdiRaft.Raft where
 
 import Numeric.Natural
-import Data.Data (Data,Typeable)
-import GHC.Generics (Generic)
+--import Data.Data (Data,Typeable)
+--import GHC.Generics (Generic)
 import Data.Set
 import VerdiRaft.RaftData as RD
 
@@ -57,7 +57,7 @@ findAtIndex (e:es)  i  | eIndex e ==  i = Just e
                        | otherwise = findAtIndex es i
 
 findGtIndex :: [Entry] -> LogIndex -> [Entry]
-findGtIndex [] i = []
+findGtIndex [] _i = []
 findGtIndex (e:es) i | eIndex e > i = e : findGtIndex es i
                      | otherwise = []
 
@@ -66,15 +66,47 @@ removeAfterIndex  = undefined
 
 maxIndex :: [Entry] -> LogIndex
 maxIndex  [] = LogIndex 0
-maxIndex (e:es) = eIndex e
+maxIndex (e:_es) = eIndex e
 
 maxTerm :: [Entry] -> Term
 maxTerm [] = Term 0
-maxTerm  (e:es) =  eTerm e
+maxTerm  (e:_es) =  eTerm e
 
 
+advanceCurrentTerm :: forall term
+                                   name
+                                   entry
+                                   logIndex
+                                   stateMachineData
+                                   output.
+                            Ord term =>
+                            RaftData
+                              term name entry logIndex ServerType stateMachineData output
+                            -> term
+                            -> RaftData
+                                 term name entry logIndex ServerType stateMachineData output
+advanceCurrentTerm state newTerm
+      | newTerm > RD.currentTerm state =
+              state{currentTerm=newTerm
+                    ,votedFor = Nothing
+                    ,rdType = Follower
+                    ,leaderId = Nothing
+                    }
+      | otherwise = state
 
-advanceCurrentTerm  =undefined
+
+getNextIndex :: forall term
+                             name
+                             logIndex
+                             serverType
+                             stateMachineData
+                             output.
+                      (Eq name, Eq logIndex) =>
+                      RaftData
+                        term name Entry logIndex serverType stateMachineData output
+                      -> [([(name, logIndex)], LogIndex)] -> LogIndex
+getNextIndex state h = maybe  (maxIndex (RD.log state)) id $ lookup (RD.nextIndex state) h
+
 
 
 
