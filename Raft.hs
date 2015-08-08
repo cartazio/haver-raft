@@ -42,7 +42,7 @@ data Msg = RequestVote Term Name LogIndex Term
 data RaftInput = Timeout | ClientRequest Natural Natural Input
     deriving (Eq,Ord,Show)
 
-data RaftOut = NotLeader  Natural Natural
+data RaftOutput = NotLeader  Natural Natural
         | ClientResponse Natural Natural Output
         deriving (Eq,Ord,Show)
 
@@ -107,6 +107,9 @@ getNextIndex :: forall term
                       -> [([(name, logIndex)], LogIndex)] -> LogIndex
 getNextIndex state h = maybe  (maxIndex (RD.log state)) id $ lookup (RD.nextIndex state) h
 
-
+tryToBecomeLeader :: Name
+        -> RaftData term name Entry logIndex serverType stateMachineData output
+        -> ([RaftOutput], RaftData, [(Name,Msg)])
+tryToBecomeLeader
 
 
