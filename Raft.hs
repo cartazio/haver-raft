@@ -5,8 +5,8 @@
 module VerdiRaft.Raft where
 
 import Numeric.Natural
-import Data.Data (Data,Typeable)
-import GHC.Generics (Generic)
+--import Data.Data (Data,Typeable)
+--import GHC.Generics (Generic)
 import Data.Set
 import VerdiRaft.RaftData as RD
 
@@ -71,17 +71,49 @@ removeAfterIndex logs@(e:es) i
   | otherwise = removeAfterIndex es i
 
 maxIndex :: [Entry] -> LogIndex
-maxIndex  [] = LogIndex 0
-maxIndex (e:_) = eIndex e
+maxIndex [] = LogIndex 0
+maxIndex (e:_es) = eIndex e
 
 maxTerm :: [Entry] -> Term
 maxTerm [] = Term 0
-maxTerm  (e:_) =  eTerm e
+maxTerm (e:_es) =  eTerm e
 
 
+advanceCurrentTerm :: forall term
+                                   name
+                                   entry
+                                   logIndex
+                                   stateMachineData
+                                   output.
+                            Ord term =>
+                            RaftData
+                              term name entry logIndex ServerType stateMachineData output
+                            -> term
+                            -> RaftData
+                                 term name entry logIndex ServerType stateMachineData output
+advanceCurrentTerm state newTerm
+      | newTerm > RD.currentTerm state =
+              state{currentTerm=newTerm
+                    ,votedFor = Nothing
+                    ,rdType = Follower
+                    ,leaderId = Nothing
+                    }
+      | otherwise = state
 
 
-advanceCurrentTerm  =undefined
+getNextIndex :: forall term
+                             name
+                             logIndex
+                             serverType
+                             stateMachineData
+                             output.
+                      (Eq name, Eq logIndex) =>
+                      RaftData
+                        term name Entry logIndex serverType stateMachineData output
+                      -> [([(name, logIndex)], LogIndex)] -> LogIndex
+getNextIndex state h = maybe  (maxIndex (RD.log state)) id $ lookup (RD.nextIndex state) h
+>>>>>>> d10578eda543c995a1f38d6af779c3c9c86343d4
+
 
 
 
