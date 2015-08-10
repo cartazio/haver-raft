@@ -1,16 +1,18 @@
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE BangPatterns #-}
+
+
 
 
 module VerdiRaft.Raft where
 
 import Numeric.Natural
+import Prelude hiding (log)
 --import Data.Data (Data,Typeable)
 --import GHC.Generics (Generic)
-import Data.Set
+--import Data.Set(Set)
 import VerdiRaft.RaftData as RD
 
-newtype Term = Term { unTerm :: Natural } deriving (Eq,Ord, Show)
+type Term =  Natural
 
 newtype LogIndex = LogIndex { unLogIndex :: Natural } deriving (Eq,Ord, Show)
 
@@ -21,7 +23,7 @@ data Output = Output deriving (Eq,Ord,Show)
 
 
 --- the verdi raft doesn't deal with changing membership
-nodes :: Set Name
+nodes ::  [Name]
 nodes = undefined
 
 data Entry = Entry { eAt :: Name
@@ -35,7 +37,7 @@ data Entry = Entry { eAt :: Name
 data Msg = RequestVote Term Name LogIndex Term
           | RequestVoteReply Term Bool
           | AppendEntries Term Name LogIndex Term [Entry] LogIndex
-          | AppendEntriesReply
+          | AppendEntriesReply Term [Entry] Bool
           deriving (Eq,Ord,Show)
 
 
@@ -69,7 +71,7 @@ maxIndex  [] = LogIndex 0
 maxIndex (e:_es) = eIndex e
 
 maxTerm :: [Entry] -> Term
-maxTerm [] = Term 0
+maxTerm [] =  0
 maxTerm  (e:_es) =  eTerm e
 
 
@@ -108,8 +110,65 @@ getNextIndex :: forall term
 getNextIndex state h = maybe  (maxIndex (RD.log state)) id $ lookup (RD.nextIndex state) h
 
 tryToBecomeLeader :: Name
-        -> RaftData term name Entry logIndex serverType stateMachineData output
-        -> ([RaftOutput], RaftData, [(Name,Msg)])
-tryToBecomeLeader
+        -> RaftData Term Name Entry logIndex ServerType stateMachineData output
+        -> ([RaftOutput], RaftData Term Name Entry logIndex ServerType stateMachineData output, [(Name,Msg)])
+tryToBecomeLeader me state =
+    ([]
+      ,state{rdType=Candidate, votedFor= Just me, votesReceived= [me], currentTerm=t}
+      ,map (\node -> (node, RequestVote t me
+                            (maxIndex (RD.log state))
+                            (maxTerm (RD.log state))  )) $
+            filter (\ h -> h == me) nodes)
+        where
+          t :: Natural
+          t = 1 + currentTerm state
+not_empty :: [a] -> Bool
+not_empty [] = False
+not_empty (_:_) = True
+
+haveNewEntries :: forall term
+                               name
+                               logIndex
+                               serverType
+                               stateMachineData
+                               output.
+                        RaftData
+                          term name Entry logIndex serverType stateMachineData output
+                        -> [Entry] -> Bool
+haveNewEntries state entries = not_empty entries
+  && (maybe True (\e -> (maxTerm entries) /= (eTerm e) ) $
+       findAtIndex (RD.log state) (maxIndex entries))
+
+
+handleAppendEntries :: Name -> RaftData Term Name  Entry LogIndex ServerType stateMachineData output -> Term -> Name -> LogIndex -> Term -> [Entry] -> LogIndex -> (RaftData  Term Name Entry LogIndex ServerType stateMachineData output, Msg  )
+handleAppendEntries me state t leaderId prevLogIndex prevLogTerm entries  leaderCommit =
+    if currentTerm state > t then
+       (state, AppendEntriesReply  (currentTerm state) entries False)
+    else if haveNewEntries state entries then
+        ((advanceCurrentTerm state t){RD.log=entries
+                ,commitIndex= max (commitIndex state)
+                        (min leaderCommit (maxIndex entries ))
+                ,rdType = Follower
+                ,leaderId = Just leaderId
+                      }
+          , AppendEntriesReply t  entries True  )
+    else case findAtIndex (RD.log state) prevLogIndex of
+      Nothing -> (state, AppendEntriesReply (currentTerm state)   entries False)
+      Just e ->
+        if  prevLogTerm /= (eTerm e) then (state, AppendEntriesReply (currentTerm state) entries False)
+          else if haveNewEntries  state entries
+            then
+              let
+                log' = removeAfterIndex (log state) prevLogIndex
+                log'' = entries ++ log'
+                 in
+                  ( (advanceCurrentTerm state t){log=log''
+                        , commitIndex= max (commitIndex state) (min leaderCommit (maxIndex log''))
+                        ,rdType= Follower
+                        ,leaderId= Just leaderId}, AppendEntriesReply t entries True)
+            else ( (advanceCurrentTerm state t){rdType = Follower
+                            ,leaderId = Just leaderId}
+                    , AppendEntriesReply t entries True )
+
 
 

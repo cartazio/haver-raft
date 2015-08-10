@@ -13,7 +13,7 @@ data RaftData term name entry logIndex serverType stateMachineData output =
       ,leaderId :: Maybe name
       ,log :: [entry]
       -- volatile
-      ,commitIdndex :: logIndex
+      ,commitIndex :: logIndex
       ,lastApplied :: logIndex
       ,stateMachine :: stateMachineData
       -- leader state
