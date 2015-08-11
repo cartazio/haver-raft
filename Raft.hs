@@ -78,10 +78,10 @@ data Msg = RequestVote Term Name LogIndex Term
 
 -- FIXME, make these Natural
 data RaftInput = Timeout
-               | ClientRequest Natural Natural Input
+               | ClientRequest ECLIENT EID Input
                deriving (Eq,Ord,Show)
 
-data RaftOutput = NotLeader  Natural Natural
+data RaftOutput = NotLeader ECLIENT EID
                 | ClientResponse ECLIENT EID Output
                 deriving (Eq,Ord,Show)
 
@@ -484,5 +484,126 @@ doLeader  state me =
       Follower -> ([],state,[])
 
 
-raftNetHandler  me src m state =
+raftNetHandler :: forall stateMachineData
+               . Name
+               -> Name
+               -> Msg
+               -> RaftData Term Name Entry LogIndex ServerType stateMachineData Output
+               -> ([RaftOutput]
+                  ,RaftData Term Name Entry LogIndex ServerType stateMachineData Output
+                  ,[(Name, Msg)])
+raftNetHandler me src m state =
+  let
+    (state', pkts) = handleMessage src me m state
+  in
+    let
+      (genericeOut, state'', genericPkts) = doGenericServer me state'
+    in
+      let
+        (leaderOut, state''', leaderPkts) = doLeader state'' me
+      in
+        (genericeOut ++ leaderOut
+        ,state'''
+        ,pkts ++ genericPkts ++ leaderPkts)
 
+
+
+handleClientRequest :: forall stateMachineData output.
+                        Name
+                        -> RaftData
+                            Term Name Entry LogIndex ServerType stateMachineData output
+                        -> ECLIENT
+                        -> EID
+                        -> Input
+                        -> ([RaftOutput],
+                            RaftData
+                            Term Name Entry LogIndex ServerType stateMachineData output,
+                            [(Name, Msg)])
+handleClientRequest me state client id' c =
+  case rdType state of
+    Leader -> let
+                index = 1 + (maxIndex (log state))
+              in
+                ([]
+                ,state{log = Entry me client id' index (currentTerm state) c : log state
+                      ,matchIndex = assocSet (matchIndex state) me index
+                      ,shouldSend = True}
+                ,[])
+    Follower -> ([NotLeader client id'], state, [])
+    Candidate -> ([NotLeader client id'], state, [])
+
+handleTimeout :: forall logIndex stateMachineData output.
+                Name
+                -> RaftData
+                    Term Name Entry logIndex ServerType stateMachineData output
+                -> ([RaftOutput],
+                    RaftData
+                        Term Name Entry logIndex ServerType stateMachineData output,
+                    [(Name, Msg)])
+handleTimeout me state =
+  case rdType state of
+    Leader -> ([], state{shouldSend=True}, []) -- We auto-heartbeat elsewhere
+    Candidate -> tryToBecomeLeader me state
+    Follower -> tryToBecomeLeader me state
+
+handleInput :: forall stateMachineData output.
+                Name
+                -> RaftInput
+                -> RaftData
+                    Term Name Entry LogIndex ServerType stateMachineData output
+                -> ([RaftOutput],
+                    RaftData
+                    Term Name Entry LogIndex ServerType stateMachineData output,
+                    [(Name, Msg)])
+handleInput me inp state =
+  case inp of
+    ClientRequest client id' c -> handleClientRequest me state client id' c
+    Timeout -> handleTimeout me state
+
+raftInputHandler :: forall stateMachineData.
+                    Name
+                    -> RaftInput
+                    -> RaftData
+                        Term Name Entry LogIndex ServerType stateMachineData Output
+                    -> ([RaftOutput],
+                        RaftData
+                        Term Name Entry LogIndex ServerType stateMachineData Output,
+                        [(Name, Msg)])
+raftInputHandler me inp state =
+    let (handlerOut, state', pkts) = handleInput me inp state in
+    let (genericOut, state'', genericPkts) = doGenericServer me state' in
+    let (leaderOut, state''', leaderPkts) = doLeader state'' me in
+    (handlerOut ++ genericOut ++ leaderOut,
+     state''', pkts ++ genericPkts ++ leaderPkts)
+
+reboot state =
+    RaftData (currentTerm state)
+             (votedFor state)
+             (leaderId state)
+             (log state)
+             (commitIndex state)
+             (lastApplied state)
+             (stateMachine state)
+             []
+             []
+             False
+             []
+             Follower
+             (clientCache state)
+             (electoralVictories state)
+
+init_handlers _name =
+    RaftData 0
+             Nothing
+             Nothing
+             []
+             0
+             0
+             init
+             []
+             []
+             False
+             []
+             Follower
+             []
+             []
