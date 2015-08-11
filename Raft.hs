@@ -320,3 +320,22 @@ applyEntry st e = let
     ([out]
     ,st {clientCache = assocSet (clientCache st) (eClient e) (unLogIndex $ eId e, out)
         ,stateMachine = d})
+
+
+catchApplyEntry :: forall term name entry logIndex serverType stateMachineData
+                .  RaftData term name entry logIndex serverType stateMachineData Output
+                -> Entry
+                -> ([Output]
+                   ,RaftData term name entry logIndex serverType stateMachineData Output)
+catchApplyEntry st e =
+  case getLastId st (eClient e) of
+    Just (id, o) -> if eId e < id
+                    then
+                      ([], st)
+                    else
+                      if eId e == id
+                      then
+                        ([o], st)
+                      else
+                        applyEntry st e
+    Nothing      -> applyEntry st e
