@@ -6,47 +6,46 @@
 
 module VerdiRaft.Raft where
 
-import           Data.Data       (Data, Typeable)
-import           GHC.Generics    (Generic)
-import           Numeric.Natural
-import           Prelude         hiding (log, pred)
-import           Data.Foldable   (foldl')
-import           Data.Maybe      (isJust)
+import Data.Data (Data, Typeable)
+import GHC.Generics (Generic)
+import Numeric.Natural
+import Prelude hiding (log, pred)
+import Data.Foldable (foldl')
+import Data.Maybe (isJust)
 
 data RaftData term name entry logIndex serverType stateMachineData output =
     RaftData {
     -- persistent
-      currentTerm         :: term
+       currentTerm        :: term
       ,votedFor           :: Maybe name
       ,leaderId           :: Maybe name
       ,log                :: [entry]
-      -- volatile
+    -- volatile
       ,commitIndex        :: logIndex
       ,lastApplied        :: logIndex
       ,stateMachine       :: stateMachineData
-      -- leader state
+    -- leader state
       ,nextIndex          :: [(name,logIndex)]
       ,matchIndex         :: [(name,logIndex)]
       ,shouldSend         :: Bool
-      -- candidate state
+    -- candidate state
       ,votesReceived      :: [name]
-      -- whoami
+    -- whoami
       ,rdType             :: serverType
-      -- client request state
+    -- client request state
       ,clientCache        :: [(ECLIENT,(EID,output))]
-      -- ghost variables ---- but do we care?
+    -- ghost variables ---- but do we care?
       ,electoralVictories :: [(term,[name],[entry])]
-
   } deriving (Read,Show,Typeable,Data,Generic)
 
 newtype Term = Term { unTerm :: Natural }
-    deriving (Read, Eq, Show, Ord, Num, Data, Typeable, Generic)
+    deriving (Read,Eq,Show,Ord,Num,Data,Typeable,Generic)
 
 newtype LogIndex = LogIndex { unLogIndex :: Natural }
-    deriving (Read, Eq, Show, Ord, Num, Data, Typeable, Generic)
+    deriving (Read,Eq,Show,Ord,Num,Data,Typeable,Generic)
 
 newtype Name = Name { unName :: Natural  }
-    deriving (Read, Eq, Show, Ord, Num, Data, Typeable, Generic)
+    deriving (Read,Eq,Show,Ord,Num,Data,Typeable,Generic)
 
 data Input = Input deriving (Eq,Ord,Show)
 data Output = Output deriving (Eq,Ord,Show)
@@ -59,6 +58,7 @@ nodes = undefined
 initState :: forall stateMachineData . stateMachineData
 initState = undefined
 
+--- VerdiRaft doesn't distiquish these but all NATS are not the same!
 newtype ECLIENT = ECLIENT { unECLIENT :: Natural }
     deriving (Read, Eq, Show, Ord, Num, Data, Typeable, Generic)
 newtype EID = EID { unEID :: Natural }
@@ -79,7 +79,6 @@ data Msg = RequestVote Term Name LogIndex Term
           | AppendEntriesReply Term [Entry] Bool
           deriving (Eq,Ord,Show)
 
--- FIXME, make these Natural
 data RaftInput = Timeout
                | ClientRequest ECLIENT EID Input
                deriving (Eq,Ord,Show)
@@ -92,7 +91,6 @@ data ServerType = Follower
                 | Candidate
                 | Leader
                 deriving (Eq,Ord,Show)
-
 
 findAtIndex :: [Entry] -> LogIndex -> Maybe Entry
 findAtIndex [] _ = Nothing
@@ -215,11 +213,10 @@ handleAppendEntries _me state t mleaderId prevLogIndex prevLogTerm entries leade
                         ,leaderId = Just mleaderId}
                  ,AppendEntriesReply t entries True)
 
-
 listupsert :: Eq k => [(k,v)] -> k -> v -> [(k,v)]
 listupsert [] k v = [(k,v)]
 listupsert (a@(k1,_):as) k v | k1 == k = (k1,v) : as
-                            | otherwise = a : listupsert as k v
+                             | otherwise = a : listupsert as k v
 
 assocSet:: Eq k => [(k,v)] -> k -> v -> [(k,v)]
 assocSet = listupsert
@@ -405,14 +402,12 @@ applyEntries h st entries =
                   in
                     (out' ++ out'', state)
 
-doGenericServer :: forall term name serverType stateMachineData .
-                         Name
-                         -> RaftData
-                              term name Entry LogIndex serverType stateMachineData Output
-                         -> ([RaftOutput],
-                             RaftData
-                               term name Entry LogIndex serverType stateMachineData Output,
-                             [(Name,Msg)])
+doGenericServer :: forall term name serverType stateMachineData
+                .  Name
+                -> RaftData term name Entry LogIndex serverType stateMachineData Output
+                -> ([RaftOutput]
+                   ,RaftData term name Entry LogIndex serverType stateMachineData Output
+                   ,[(Name,Msg)])
 doGenericServer h state =
     let (out, state') = applyEntries h state
                       (reverse
@@ -422,11 +417,12 @@ doGenericServer h state =
      in
           (out , state'{lastApplied= if commitIndex state' > lastApplied state'  then commitIndex state else lastApplied state}, [])
 
-replicaMessage :: forall name serverType stateMachineData output.
-                        Eq name =>
-                        RaftData
-                          Term name Entry LogIndex serverType stateMachineData output
-                        -> Name -> name -> (name, Msg)
+replicaMessage :: forall name serverType stateMachineData output
+               .  Eq name
+               => RaftData Term name Entry LogIndex serverType stateMachineData output
+               -> Name
+               -> name
+               -> (name, Msg)
 replicaMessage state me host =
   let prevIndex = pred (getNextIndex state host) in
    let prevTerm = case findAtIndex (log state) prevIndex of
@@ -436,56 +432,54 @@ replicaMessage state me host =
       let newEntries = findGtIndex  (log state) prevIndex in
          (host, AppendEntries (currentTerm state) me prevIndex prevTerm newEntries (commitIndex state))
 
-haveQuorum :: forall
-                           term
-                           entry
-                           serverType
-                           stateMachineData
-                           output.
-                    RaftData term Name entry LogIndex serverType stateMachineData output
-                    -> Name -> LogIndex -> Bool
+haveQuorum :: forall term entry serverType stateMachineData output
+           .  RaftData term Name entry LogIndex serverType stateMachineData output
+           -> Name
+           -> LogIndex
+           -> Bool
 haveQuorum state  _me n   =
    div2 (fromIntegral $ length nodes)
         < (fromIntegral $ length $ filter (\h -> n <= assocDefault (matchIndex state) h 0 ) nodes)
 
-advanceCommitIndex :: forall serverType stateMachineData output.
-                            RaftData
-                              Term Name Entry LogIndex serverType stateMachineData output
-                            -> Name
-                            -> RaftData
-                                 Term Name Entry LogIndex serverType stateMachineData output
-advanceCommitIndex state me  =
-   let entriesToCommit =  filter
-             (\ e  -> (currentTerm state == eTerm e)
-                               && (commitIndex state < eIndex e )
-                               && (haveQuorum state me (eIndex e) ) )
-             (findGtIndex (log state) (commitIndex state) )
+advanceCommitIndex :: forall serverType stateMachineData output
+                   .  RaftData Term Name Entry LogIndex serverType stateMachineData output
+                   -> Name
+                   -> RaftData Term Name Entry LogIndex serverType stateMachineData output
+advanceCommitIndex state me =
+   let entriesToCommit = filter
+             (\ e -> (currentTerm state == eTerm e)
+                     && (commitIndex state < eIndex e)
+                     && (haveQuorum state me (eIndex e)))
+             (findGtIndex (log state) (commitIndex state))
      in
-        state{commitIndex=(\ a c b -> foldl' a b c ) max (map eIndex entriesToCommit) (commitIndex state)}
+        state{commitIndex=(\a c b -> foldl' a b c) max (map eIndex entriesToCommit) (commitIndex state)}
 
-doLeader :: forall stateMachineData output .
-                  RaftData
-                    Term Name Entry LogIndex ServerType stateMachineData output
-                  -> Name
-                  -> ([RaftOutput],
-                      RaftData
-                        Term Name Entry LogIndex ServerType stateMachineData output,
-                      [(Name, Msg)])
-doLeader  state me =
-    case rdType state  of
-      Leader -> let state' = advanceCommitIndex state me in
-          if shouldSend state' then
-              let state'' = state'{shouldSend = False} in
-              let replicaMessages = map (replicaMessage state'' me)
+doLeader :: forall stateMachineData output
+         .  RaftData Term Name Entry LogIndex ServerType stateMachineData output
+         -> Name
+         -> ([RaftOutput]
+            ,RaftData Term Name Entry LogIndex ServerType stateMachineData output
+            ,[(Name, Msg)])
+doLeader state me =
+    case rdType state of
+      Leader -> let
+          state' = advanceCommitIndex state me
+        in
+          if shouldSend state'
+          then
+              let
+                state'' = state'{shouldSend = False}
+              in
+                let
+                  replicaMessages = map (replicaMessage state'' me)
                                         (filter
-                                          (\ h -> if me == h then False else True) nodes )
+                                         (\ h -> if me == h then False else True) nodes)
                 in
                    ([], state'', replicaMessages)
                else
                 ([], state',[])
       Candidate  -> ([], state,[])
       Follower -> ([],state,[])
-
 
 raftNetHandler :: forall stateMachineData
                . Name
@@ -509,19 +503,15 @@ raftNetHandler me src m state =
         ,state'''
         ,pkts ++ genericPkts ++ leaderPkts)
 
-
-
-handleClientRequest :: forall stateMachineData output.
-                        Name
-                        -> RaftData
-                            Term Name Entry LogIndex ServerType stateMachineData output
-                        -> ECLIENT
-                        -> EID
-                        -> Input
-                        -> ([RaftOutput],
-                            RaftData
-                            Term Name Entry LogIndex ServerType stateMachineData output,
-                            [(Name, Msg)])
+handleClientRequest :: forall stateMachineData output
+                    .  Name
+                    -> RaftData Term Name Entry LogIndex ServerType stateMachineData output
+                    -> ECLIENT
+                    -> EID
+                    -> Input
+                    -> ([RaftOutput]
+                        ,RaftData Term Name Entry LogIndex ServerType stateMachineData output
+                        ,[(Name, Msg)])
 handleClientRequest me state client id' c =
   case rdType state of
     Leader -> let
@@ -535,49 +525,50 @@ handleClientRequest me state client id' c =
     Follower -> ([NotLeader client id'], state, [])
     Candidate -> ([NotLeader client id'], state, [])
 
-handleTimeout :: forall logIndex stateMachineData output.
-                Name
-                -> RaftData
-                    Term Name Entry logIndex ServerType stateMachineData output
-                -> ([RaftOutput],
-                    RaftData
-                        Term Name Entry logIndex ServerType stateMachineData output,
-                    [(Name, Msg)])
+handleTimeout :: forall logIndex stateMachineData output
+              .  Name
+              -> RaftData Term Name Entry logIndex ServerType stateMachineData output
+              -> ([RaftOutput]
+                 ,RaftData Term Name Entry logIndex ServerType stateMachineData output
+                 ,[(Name, Msg)])
 handleTimeout me state =
   case rdType state of
     Leader -> ([], state{shouldSend=True}, []) -- We auto-heartbeat elsewhere
     Candidate -> tryToBecomeLeader me state
     Follower -> tryToBecomeLeader me state
 
-handleInput :: forall stateMachineData output.
-                Name
-                -> RaftInput
-                -> RaftData
-                    Term Name Entry LogIndex ServerType stateMachineData output
-                -> ([RaftOutput],
-                    RaftData
-                    Term Name Entry LogIndex ServerType stateMachineData output,
-                    [(Name, Msg)])
+handleInput :: forall stateMachineData output
+            .  Name
+            -> RaftInput
+            -> RaftData Term Name Entry LogIndex ServerType stateMachineData output
+            -> ([RaftOutput]
+               ,RaftData Term Name Entry LogIndex ServerType stateMachineData output
+               ,[(Name, Msg)])
 handleInput me inp state =
   case inp of
     ClientRequest client id' c -> handleClientRequest me state client id' c
     Timeout -> handleTimeout me state
 
-raftInputHandler :: forall stateMachineData.
-                    Name
-                    -> RaftInput
-                    -> RaftData
-                        Term Name Entry LogIndex ServerType stateMachineData Output
-                    -> ([RaftOutput],
-                        RaftData
-                        Term Name Entry LogIndex ServerType stateMachineData Output,
-                        [(Name, Msg)])
+raftInputHandler :: forall stateMachineData
+                 . Name
+                 -> RaftInput
+                 -> RaftData Term Name Entry LogIndex ServerType stateMachineData Output
+                 -> ([RaftOutput]
+                    ,RaftData Term Name Entry LogIndex ServerType stateMachineData Output
+                    ,[(Name, Msg)])
 raftInputHandler me inp state =
-    let (handlerOut, state', pkts) = handleInput me inp state in
-    let (genericOut, state'', genericPkts) = doGenericServer me state' in
-    let (leaderOut, state''', leaderPkts) = doLeader state'' me in
-    (handlerOut ++ genericOut ++ leaderOut,
-     state''', pkts ++ genericPkts ++ leaderPkts)
+    let
+      (handlerOut, state', pkts) = handleInput me inp state
+    in
+      let
+        (genericOut, state'', genericPkts) = doGenericServer me state'
+      in
+        let
+          (leaderOut, state''', leaderPkts) = doLeader state'' me
+        in
+          (handlerOut ++ genericOut ++ leaderOut
+          ,state'''
+          ,pkts ++ genericPkts ++ leaderPkts)
 
 reboot :: forall term name entry logIndex serverType stateMachineData output
        .  RaftData term name entry logIndex serverType stateMachineData output
