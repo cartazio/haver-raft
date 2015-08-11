@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE ScopedTypeVariables, GeneralizedNewtypeDeriving, KindSignatures #-}
 
 module VerdiRaft.Raft where
 
@@ -256,6 +256,9 @@ div2 1 = 0
 div2 0 = 0
 div2 n = 1 +  div2 (n-2)
 
+wonElection ::  forall (t :: * -> *) a. Foldable t => t a -> Bool
+wonElection votes = 1 + (div2 (fromIntegral $ length nodes)) <=  (fromIntegral $  length votes)
+
 handleRequestVoteReply :: forall
                                        term
                                        name
@@ -275,4 +278,9 @@ handleRequestVoteReply :: forall
 handleRequestVoteReply _me state _src t  _voted =
     if t > currentTerm state then (advanceCurrentTerm state t){rdType = Follower}
       else undefined
+
+
+
+
+
 
