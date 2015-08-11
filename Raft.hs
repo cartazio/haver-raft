@@ -280,7 +280,47 @@ handleRequestVoteReply _me state _src t  _voted =
       else undefined
 
 
+handleMessage :: forall stateMachineData output.
+                       Name
+                       -> Name
+                       -> Msg
+                       -> RaftData
+                            Term Name Entry LogIndex ServerType stateMachineData output
+                       -> (RaftData
+                             Term Name Entry LogIndex ServerType stateMachineData output,
+                           [(Name, Msg)])
+handleMessage src me m state =
+  case m of
+    AppendEntries t lid prevLogIndex prevLogTerm entries leaderCommit ->
+       let (st,r) = handleAppendEntries me state t lid prevLogIndex prevLogTerm entries leaderCommit in
+          (st, [(src,r)])
+    AppendEntriesReply term entries result -> handleAppendEntriesReply me state src term entries result
+    RequestVote t _candidateId  lastLogIndex lastLogTerm ->
+      let (st,r) = handleRequestVote me state t src lastLogIndex lastLogTerm
+        in (st,[(src,r)])
+    RequestVoteReply t voteGranted -> (handleRequestVoteReply me state src t voteGranted,[])
+
+assoc :: forall  a b. Eq a => [(a, b)] -> a -> Maybe b
+assoc = flip lookup
+
+getLastId :: forall term
+                          name
+                          entry
+                          logIndex
+                          serverType
+                          stateMachineData
+                          output.
+                   RaftData
+                     term name entry logIndex serverType stateMachineData output
+                   -> Natural -> Maybe (Natural, output)
+getLastId state client = assoc   (clientCache state) client
 
 
+--handler handler : input -> data -> (output * data)
+-- data == stateMachineData
+handler :: forall dataa . Input -> dataa -> (Output,dataa)
+handler= error "fill me out/ abstract meeeee "
 
-
+applyEntry st e = let (out,d) = handler (eInput e) (stateMachine st) in
+  ([out], st{clientCache = assoc_set (clientCache st) (eClient e) (eId e, out)
+            ,stateMachine = d })
