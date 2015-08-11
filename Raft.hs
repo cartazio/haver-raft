@@ -339,3 +339,28 @@ catchApplyEntry st e =
                       else
                         applyEntry st e
     Nothing      -> applyEntry st e
+
+applyEntries :: forall term name entry logIndex serverType stateMachineData
+             . Name
+             -> RaftData term name entry logIndex serverType stateMachineData Output
+             -> [Entry]
+             -> ([RaftOutput]
+                ,RaftData term name entry logIndex serverType stateMachineData Output)
+applyEntries h st entries =
+  case entries of
+    []     -> ([], st)
+    (e:es) -> let
+                (out, st') = catchApplyEntry st e
+              in
+                let
+                  out' = if eAt e == h
+                         then
+                           fmap (\o -> ClientResponse (eClient e) (unLogIndex $ eId e) o) out
+                         else
+                           []
+                in
+                  let
+                    (out'', state) = applyEntries h st' es
+                  in
+                    (out' ++ out'', state)
+
