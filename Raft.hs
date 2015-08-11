@@ -185,20 +185,19 @@ pred n | n <= 0 = 0
 handleAppendEntriesReply :: forall t
                                          term
                                          name
-                                         serverType
                                          stateMachineData
                                          output
                                          .
-                                  (Eq term, Eq name) =>
+                                  (Ord term, Eq name) =>
                                   t
                                   -> RaftData
-                                       term name Entry LogIndex serverType stateMachineData output
+                                       term name Entry LogIndex ServerType stateMachineData output
                                   -> name
                                   -> term
                                   -> [Entry]
                                   -> Bool
                                   -> (RaftData
-                                        term name Entry LogIndex serverType stateMachineData output,
+                                        term name Entry LogIndex ServerType stateMachineData output,
                                       [(name,Msg)])
 handleAppendEntriesReply  _me state src term entries result =
     if currentTerm state == term then
@@ -215,5 +214,9 @@ handleAppendEntriesReply  _me state src term entries result =
                     $ pred (getNextIndex state src )}
               ,[])
 
-          else undefined
+          else if currentTerm state < term then
+            -- follower behind, ignore
+            (state,[])
+          else -- leader behind, convert to follower
+            (advanceCurrentTerm state term, [])
 
