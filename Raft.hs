@@ -272,7 +272,7 @@ handleRequestVoteReply :: forall
                                 -> Bool
                                 -> RaftData
                                      term name entry logIndex ServerType stateMachineData output
-handleRequestVoteReply _me state src t  _voted =
+handleRequestVoteReply _me state _src t  _voted =
     if t > currentTerm state then (advanceCurrentTerm state t){rdType = Follower}
       else undefined
 
