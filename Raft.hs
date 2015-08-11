@@ -220,3 +220,59 @@ handleAppendEntriesReply  _me state src term entries result =
           else -- leader behind, convert to follower
             (advanceCurrentTerm state term, [])
 
+moreUpToDate :: forall a a1.
+                      (Ord a, Ord a1) =>
+                      a -> a1 -> a -> a1 -> Bool
+moreUpToDate t1 i1 t2 i2 = (t1 > t2 ) || ((t1 == t2) && (i1 >= i2))
+
+
+handleRequestVote :: forall
+
+
+
+                                  name
+                                  entry
+                                  logIndex
+                                  serverType
+                                  stateMachineData
+                                  output.
+                           name
+                           -> RaftData
+                                Term name entry logIndex serverType stateMachineData output
+                           -> Term
+                           -> name
+                           -> LogIndex
+                           -> Term
+                           -> (RaftData
+                                 Term name entry logIndex serverType stateMachineData output,
+                               Msg)
+handleRequestVote _me state t _candidateId _lastLogIndex _lastLogTerm =
+   if currentTerm state > t then
+      (state,RequestVoteReply (currentTerm state) False)
+      else undefined
+
+div2 :: Natural -> Natural
+div2 1 = 0
+div2 0 = 0
+div2 n = 1 +  div2 (n-2)
+
+handleRequestVoteReply :: forall
+                                       term
+                                       name
+                                       entry
+                                       logIndex
+                                       stateMachineData
+                                       output.
+                                Ord term =>
+                                name
+                                -> RaftData
+                                     term name entry logIndex ServerType stateMachineData output
+                                -> name
+                                -> term
+                                -> Bool
+                                -> RaftData
+                                     term name entry logIndex ServerType stateMachineData output
+handleRequestVoteReply _me state src t  _voted =
+    if t > currentTerm state then (advanceCurrentTerm state t){rdType = Follower}
+      else undefined
+
