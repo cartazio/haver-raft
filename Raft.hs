@@ -476,8 +476,8 @@ doLeader state me =
                                          (\ h -> if me == h then False else True) nodes)
                 in
                    ([], state'', replicaMessages)
-               else
-                ([], state',[])
+          else
+            ([], state',[])
       Candidate  -> ([], state,[])
       Follower -> ([],state,[])
 
