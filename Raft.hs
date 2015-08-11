@@ -303,8 +303,7 @@ getLastId :: forall term name entry logIndex serverType stateMachineData output
           .  RaftData term name entry logIndex serverType stateMachineData output
           -> Natural
           -> Maybe (Natural, output)
-getLastId state = assoc (clientCache state)
--- getLastId state client = assoc (clientCache state) client -- ETA Reduced from this
+getLastId state client = assoc (clientCache state) client
 
 handler :: forall dataa . Input -> dataa -> (Output,dataa)
 handler = error "fill me out/ abstract meeeee "
