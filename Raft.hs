@@ -1,20 +1,52 @@
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE ScopedTypeVariables, GeneralizedNewtypeDeriving, KindSignatures #-}
+{-# LANGUAGE DeriveDataTypeable #-}
 
 module VerdiRaft.Raft where
 
 import Numeric.Natural
 import Prelude hiding (log,pred)
---import Data.Data (Data,Typeable)
---import GHC.Generics (Generic)
+import Data.Data (Data,Typeable)
+import GHC.Generics (Generic)
 --import Data.Set(Set)
 import Data.Maybe (isJust)
-import VerdiRaft.RaftData as RD
 
-newtype Term = Term { unTerm :: Natural } deriving (Eq,Ord, Show, Num)
+data RaftData term name entry logIndex serverType stateMachineData output =
+    RaftData {
+    -- persistent
+      currentTerm :: term
+      ,votedFor :: Maybe name
+      ,leaderId :: Maybe name
+      ,log :: [entry]
+      -- volatile
+      ,commitIndex :: logIndex
+      ,lastApplied :: logIndex
+      ,stateMachine :: stateMachineData
+      -- leader state
+      ,nextIndex :: [(name,logIndex)]
+      ,matchIndex :: [(name,logIndex)]
+      ,shouldSend :: Bool
+      -- candidate state
+      ,votesReceived :: [name]
+      -- whoami
+      ,rdType :: serverType
+      -- client request state
+      ,clientCache :: [(ECLIENT,(EID,output))]
+          -- this might be wrong, original version is nat and nat instead of logindex log index
 
-newtype LogIndex = LogIndex { unLogIndex :: Natural } deriving (Eq,Ord, Show,Num)
+      -- ghost variables ---- but do we care?
+      ,electoralVictories :: [(term,[name],[entry])]
 
-newtype Name = Name { unName :: Natural  } deriving (Eq,  Ord, Show,Num)
+  } deriving (Read,Show,Typeable,Data,Generic)
+
+newtype Term = Term { unTerm :: Natural }
+    deriving (Read, Eq, Show, Ord, Num, Data, Typeable, Generic)
+
+newtype LogIndex = LogIndex { unLogIndex :: Natural }
+    deriving (Read, Eq, Show, Ord, Num, Data, Typeable, Generic)
+
+newtype Name = Name { unName :: Natural  }
+    deriving (Read, Eq, Show, Ord, Num, Data, Typeable, Generic)
 
 data Input = Input deriving (Eq,Ord,Show)
 data Output = Output deriving (Eq,Ord,Show)
@@ -23,9 +55,10 @@ data Output = Output deriving (Eq,Ord,Show)
 nodes ::  [Name]
 nodes = undefined
 
-newtype ECLIENT = ECLIENT { unECLIENT :: Natural } deriving (Eq, Show, Ord, Num)
-
-newtype EID = EID { unEID :: Natural } deriving (Eq, Show, Ord, Num )
+newtype ECLIENT = ECLIENT { unECLIENT :: Natural }
+    deriving (Read, Eq, Show, Ord, Num, Data, Typeable, Generic)
+newtype EID = EID { unEID :: Natural }
+    deriving (Read, Eq, Show, Ord, Num, Data, Typeable, Generic)
 
 data Entry = Entry {
    eAt :: Name
@@ -48,7 +81,7 @@ data RaftInput = Timeout
                deriving (Eq,Ord,Show)
 
 data RaftOutput = NotLeader  Natural Natural
-                | ClientResponse LogIndex LogIndex Output
+                | ClientResponse ECLIENT EID Output
                 deriving (Eq,Ord,Show)
 
 data ServerType = Follower
@@ -90,7 +123,7 @@ advanceCurrentTerm :: forall term name entry logIndex stateMachineData output
                    -> term
                    -> RaftData term name entry logIndex ServerType stateMachineData output
 advanceCurrentTerm state newTerm
-      | newTerm > RD.currentTerm state =
+      | newTerm > currentTerm state =
               state {currentTerm = newTerm
                     ,votedFor = Nothing
                     ,rdType = Follower
@@ -107,9 +140,9 @@ getNextIndex state h = assocDefault (nextIndex state) h (maxIndex (log state))
 
 tryToBecomeLeader :: Name
                   -> RaftData Term Name Entry logIndex ServerType stateMachineData output
-                  -> ( [RaftOutput]
-                     , RaftData Term Name Entry logIndex ServerType stateMachineData output
-                     , [(Name,Msg)])
+                  -> ([RaftOutput]
+                     ,RaftData Term Name Entry logIndex ServerType stateMachineData output
+                     ,[(Name,Msg)])
 tryToBecomeLeader me state =
     ([]
     ,state {rdType = Candidate
@@ -117,11 +150,11 @@ tryToBecomeLeader me state =
            ,votesReceived = [me]
            ,currentTerm = t}
     ,map (\node -> (node, RequestVote t me
-                            (maxIndex (RD.log state))
-                            (maxTerm (RD.log state)))
+                            (maxIndex (log state))
+                            (maxTerm (log state)))
          ) $ filter (\h -> h == me) nodes)
         where
-          t :: Natural
+          t :: Term
           t = 1 + currentTerm state
 
 notEmpty :: [a] -> Bool
@@ -133,7 +166,7 @@ haveNewEntries :: forall term name logIndex serverType stateMachineData output
                -> [Entry]
                -> Bool
 haveNewEntries state entries =
-  notEmpty entries && case findAtIndex (RD.log state) (maxIndex entries) of
+  notEmpty entries && case findAtIndex (log state) (maxIndex entries) of
                         Just e -> maxTerm entries /= eTerm e
                         Nothing -> False
 
@@ -152,12 +185,12 @@ handleAppendEntries _me state t mleaderId prevLogIndex prevLogTerm entries leade
        (state, AppendEntriesReply (currentTerm state) entries False)
     else if haveNewEntries state entries then
         ((advanceCurrentTerm state t) {
-              RD.log      = entries
+              log      = entries
              ,commitIndex = max (commitIndex state) (min leaderCommit (maxIndex entries ))
              ,rdType      = Follower
              ,leaderId    = Just mleaderId }
         ,AppendEntriesReply t entries True)
-    else case findAtIndex (RD.log state) prevLogIndex of
+    else case findAtIndex (log state) prevLogIndex of
       Nothing -> (state, AppendEntriesReply (currentTerm state) entries False)
       Just e ->
         if prevLogTerm /= eTerm e then (state, AppendEntriesReply (currentTerm state) entries False)
@@ -306,8 +339,8 @@ assoc = flip lookup
 
 getLastId :: forall  term name entry  serverType stateMachineData output
           .  RaftData term name entry LogIndex serverType stateMachineData output
-          -> LogIndex
-          -> Maybe (LogIndex, output)
+          -> ECLIENT
+          -> Maybe (EID, output)
 getLastId state client = assoc (clientCache state) client
 
 handler :: forall dataa . Input -> dataa -> (Output,dataa)
