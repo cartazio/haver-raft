@@ -7,10 +7,10 @@ import Prelude hiding (log,pred)
 --import Data.Data (Data,Typeable)
 --import GHC.Generics (Generic)
 --import Data.Set(Set)
-import Data.Maybe (isJust, fromMaybe)
+import Data.Maybe (isJust)
 import VerdiRaft.RaftData as RD
 
-type Term =  Natural
+newtype Term = Term { unTerm :: Natural } deriving (Eq,Ord, Show, Num)
 
 newtype LogIndex = LogIndex { unLogIndex :: Natural } deriving (Eq,Ord, Show,Num)
 
@@ -23,10 +23,14 @@ data Output = Output deriving (Eq,Ord,Show)
 nodes ::  [Name]
 nodes = undefined
 
+newtype ECLIENT = ECLIENT { unECLIENT :: Natural } deriving (Eq, Show, Ord, Num)
+
+newtype EID = EID { unEID :: Natural } deriving (Eq, Show, Ord, Num )
+
 data Entry = Entry {
    eAt :: Name
-  ,eClient :: Natural
-  ,eId :: LogIndex
+  ,eClient :: ECLIENT -- should this be Name?
+  ,eId :: EID
   ,eIndex :: LogIndex
   ,eTerm :: Term
   ,eInput :: Input
@@ -38,12 +42,13 @@ data Msg = RequestVote Term Name LogIndex Term
           | AppendEntriesReply Term [Entry] Bool
           deriving (Eq,Ord,Show)
 
+-- FIXME, make these Natural
 data RaftInput = Timeout
                | ClientRequest Natural Natural Input
                deriving (Eq,Ord,Show)
 
 data RaftOutput = NotLeader  Natural Natural
-                | ClientResponse Natural Natural Output
+                | ClientResponse LogIndex LogIndex Output
                 deriving (Eq,Ord,Show)
 
 data ServerType = Follower
@@ -299,52 +304,52 @@ handleMessage src me m state =
 assoc :: forall  a b. Eq a => [(a, b)] -> a -> Maybe b
 assoc = flip lookup
 
-getLastId :: forall term name entry logIndex serverType stateMachineData output
-          .  RaftData term name entry logIndex serverType stateMachineData output
-          -> Natural
-          -> Maybe (Natural, output)
+getLastId :: forall  term name entry  serverType stateMachineData output
+          .  RaftData term name entry LogIndex serverType stateMachineData output
+          -> LogIndex
+          -> Maybe (LogIndex, output)
 getLastId state client = assoc (clientCache state) client
 
 handler :: forall dataa . Input -> dataa -> (Output,dataa)
 handler = error "fill me out/ abstract meeeee "
 
-applyEntry :: forall term name entry logIndex serverType stateMachineData
-           .  RaftData term name entry logIndex serverType stateMachineData Output
+applyEntry :: forall term name entry  serverType stateMachineData
+           .  RaftData term name entry LogIndex serverType stateMachineData Output
            -> Entry
            -> ([Output]
-              ,RaftData term name entry logIndex serverType stateMachineData Output)
+              ,RaftData term name entry LogIndex serverType stateMachineData Output)
 applyEntry st e = let
     (out,d) = handler (eInput e) (stateMachine st)
   in
     ([out]
-    ,st {clientCache = assocSet (clientCache st) (eClient e) (unLogIndex $ eId e, out)
+    ,st {clientCache = assocSet (clientCache st) (eClient e) (eId e, out)
         ,stateMachine = d})
 
 
-catchApplyEntry :: forall term name entry logIndex serverType stateMachineData
-                .  RaftData term name entry logIndex serverType stateMachineData Output
+catchApplyEntry :: forall term name entry  serverType stateMachineData
+                .  RaftData term name entry LogIndex serverType stateMachineData Output
                 -> Entry
                 -> ([Output]
-                   ,RaftData term name entry logIndex serverType stateMachineData Output)
+                   ,RaftData term name entry LogIndex serverType stateMachineData Output)
 catchApplyEntry st e =
   case getLastId st (eClient e) of
-    Just (id', o) -> if unLogIndex (eId e) < id'
+    Just (id', o) -> if  (eId e) < id'
                     then
                       ([], st)
                     else
-                      if unLogIndex (eId e) == id'
+                      if  (eId e) == id'
                       then
                         ([o], st)
                       else
                         applyEntry st e
     Nothing      -> applyEntry st e
 
-applyEntries :: forall term name entry logIndex serverType stateMachineData
+applyEntries :: forall term name entry  serverType stateMachineData
              . Name
-             -> RaftData term name entry logIndex serverType stateMachineData Output
+             -> RaftData term name entry LogIndex serverType stateMachineData Output
              -> [Entry]
              -> ([RaftOutput]
-                ,RaftData term name entry logIndex serverType stateMachineData Output)
+                ,RaftData term name entry LogIndex serverType stateMachineData Output)
 applyEntries h st entries =
   case entries of
     []     -> ([], st)
@@ -354,7 +359,7 @@ applyEntries h st entries =
                 let
                   out' = if eAt e == h
                          then
-                           fmap (\o -> ClientResponse (eClient e) (unLogIndex $ eId e) o) out
+                           fmap (\o -> ClientResponse (eClient e) (eId e) o) out
                          else
                            []
                 in
@@ -362,4 +367,6 @@ applyEntries h st entries =
                     (out'', state) = applyEntries h st' es
                   in
                     (out' ++ out'', state)
+
+
 

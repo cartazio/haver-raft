@@ -25,7 +25,9 @@ data RaftData term name entry logIndex serverType stateMachineData output =
       -- whoami
       ,rdType :: serverType
       -- client request state
-      ,clientCache :: [(Natural,(Natural,output))]
+      ,clientCache :: [(logIndex,(logIndex,output))]
+          -- this might be wrong, original version is nat and nat instead of logindex log index
+
       -- ghost variables ---- but do we care?
       ,electoralVictories :: [(term,[name],[entry])]
 
