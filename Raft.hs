@@ -576,6 +576,9 @@ raftInputHandler me inp state =
     (handlerOut ++ genericOut ++ leaderOut,
      state''', pkts ++ genericPkts ++ leaderPkts)
 
+reboot :: forall term name entry logIndex serverType stateMachineData output
+       .  RaftData term name entry logIndex serverType stateMachineData output
+       -> RaftData term name entry logIndex ServerType stateMachineData output
 reboot state =
     RaftData (currentTerm state)
              (votedFor state)
@@ -592,7 +595,10 @@ reboot state =
              (clientCache state)
              (electoralVictories state)
 
-init_handlers _name =
+initHandlers :: forall term name entry logIndex serverType stateMachineData output
+             .  RaftData term name entry logIndex serverType stateMachineData output
+             -> RaftData term name entry logIndex ServerType stateMachineData output
+initHandlers _name =
     RaftData 0
              Nothing
              Nothing
