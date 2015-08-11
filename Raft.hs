@@ -3,7 +3,7 @@
 module VerdiRaft.Raft where
 
 import Numeric.Natural
-import Prelude hiding (log)
+import Prelude hiding (log,pred)
 --import Data.Data (Data,Typeable)
 --import GHC.Generics (Generic)
 --import Data.Set(Set)
@@ -86,11 +86,16 @@ advanceCurrentTerm state newTerm
                     }
       | otherwise = state
 
-getNextIndex :: forall term name  serverType stateMachineData output . (Eq name)
-             => RaftData term name Entry LogIndex serverType stateMachineData output
-             -> [([(name, LogIndex)], LogIndex)]
-             -> LogIndex
-getNextIndex state h = maybe (maxIndex (RD.log state)) id $ lookup (RD.nextIndex state) h
+getNextIndex :: forall term
+                             name
+                             serverType
+                             stateMachineData
+                             output.
+                      Eq name =>
+                      RaftData
+                        term name Entry LogIndex serverType stateMachineData output
+                      -> name -> LogIndex
+getNextIndex state h = assoc_default (nextIndex state) h (maxIndex (log state))
 
 tryToBecomeLeader :: Name
                   -> RaftData Term Name Entry logIndex ServerType stateMachineData output
@@ -173,8 +178,19 @@ assoc_set = listupsert
 assoc_default :: Eq k => [(k,v)] -> k -> v -> v
 assoc_default ls k def = maybe def id $ lookup  k ls
 
-handleAppendEntriesReply :: Eq name =>
-                                     name
+pred :: (Num a, Ord a ,Eq a) => a -> a
+pred n | n <= 0 = 0
+       | otherwise = n -1
+
+handleAppendEntriesReply :: forall t
+                                         term
+                                         name
+                                         serverType
+                                         stateMachineData
+                                         output
+                                         .
+                                  (Eq term, Eq name) =>
+                                  t
                                   -> RaftData
                                        term name Entry LogIndex serverType stateMachineData output
                                   -> name
@@ -182,18 +198,22 @@ handleAppendEntriesReply :: Eq name =>
                                   -> [Entry]
                                   -> Bool
                                   -> (RaftData
-                                        term name Entry LogIndex serverType stateMachineData output
-                                    ,[(name,Msg)] )
-handleAppendEntriesReply  me state src term entries result =
+                                        term name Entry LogIndex serverType stateMachineData output,
+                                      [(name,Msg)])
+handleAppendEntriesReply  _me state src term entries result =
     if currentTerm state == term then
       if result then
         let index = maxIndex entries in
           (state{matchIndex=  assoc_set (matchIndex state) src
                   $ max (assoc_default (matchIndex state) src 0) index
-                ,nextIndex= assoc_set (nextIndex state) src $
-                            max (getNextIndex state src :: LogIndex) (1 + index :: LogIndex) }
+                ,nextIndex= assoc_set (nextIndex state) src
+                            (max (getNextIndex state src ) (1 + index) :: LogIndex) }
             ,[])
 
-          else undefined
+          else
+            (state{nextIndex = assoc_set (nextIndex state) src
+                    $ pred (getNextIndex state src )}
+              ,[])
+
           else undefined
 
