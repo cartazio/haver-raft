@@ -127,8 +127,10 @@ haveNewEntries :: forall term name logIndex serverType stateMachineData output
                 . RaftData term name Entry logIndex serverType stateMachineData output
                -> [Entry]
                -> Bool
-haveNewEntries state entries = notEmpty entries
-  && maybe True (\e -> maxTerm entries /= eTerm e) (findAtIndex (RD.log state) (maxIndex entries))
+haveNewEntries state entries =
+  notEmpty entries && case findAtIndex (RD.log state) (maxIndex entries) of
+                        Just e -> maxTerm entries /= eTerm e
+                        Nothing -> False
 
 handleAppendEntries :: Name
                     -> RaftData Term Name Entry LogIndex ServerType stateMachineData output
@@ -181,8 +183,7 @@ assocSet:: Eq k => [(k,v)] -> k -> v -> [(k,v)]
 assocSet = listupsert
 
 assocDefault :: Eq k => [(k,v)] -> k -> v -> v
-assocDefault ls k def = fromMaybe def $ lookup k ls
--- assocDefault ls k def = maybe def id $ lookup k ls -- Less idiomatic, but direct in translation
+assocDefault ls k def = maybe def id $ lookup k ls
 
 pred :: (Num a, Ord a ,Eq a) => a -> a
 pred n | n <= 0 = 0
@@ -202,16 +203,15 @@ handleAppendEntriesReply _me state src term entries result =
     if currentTerm state == term then
       if result then
         let index = maxIndex entries in
-          (state{matchIndex=  assocSet (matchIndex state) src
-                  $ max (assocDefault (matchIndex state) src 0) index
-                ,nextIndex= assocSet (nextIndex state) src
-                            (max (getNextIndex state src ) (1 + index) :: LogIndex) }
-            ,[])
+          (state {matchIndex =
+                   assocSet (matchIndex state) src $ max (assocDefault (matchIndex state) src 0) index
+                 ,nextIndex =
+                   assocSet (nextIndex state) src (max (getNextIndex state src ) (1 + index) :: LogIndex)}
+          ,[])
 
           else
-            (state{nextIndex = assocSet (nextIndex state) src
-                    $ pred (getNextIndex state src )}
-              ,[])
+            (state{nextIndex = assocSet (nextIndex state) src $ pred (getNextIndex state src)}
+            ,[])
 
           else if currentTerm state < term then
             -- follower behind, ignore
@@ -242,7 +242,7 @@ handleRequestVote _me state t candidateId lastLogIndex lastLogTerm =
      let
        state' = advanceCurrentTerm state t
      in
-       if isJust (leaderId state') -- Direct Translation: `if isJust (leaderId state') then False else True`
+       if (if isJust (leaderId state') then False else True)
           && moreUpToDate lastLogTerm lastLogIndex (maxTerm (log state')) (maxIndex (log state'))
        then
          case votedFor state' of
