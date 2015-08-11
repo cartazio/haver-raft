@@ -7,6 +7,7 @@ import Prelude hiding (log,pred)
 --import Data.Data (Data,Typeable)
 --import GHC.Generics (Generic)
 --import Data.Set(Set)
+import Data.Maybe
 import VerdiRaft.RaftData as RD
 
 type Term =  Natural
@@ -226,30 +227,31 @@ moreUpToDate :: forall a a1.
 moreUpToDate t1 i1 t2 i2 = (t1 > t2 ) || ((t1 == t2) && (i1 >= i2))
 
 
-handleRequestVote :: forall
-
-
-
-                                  name
-                                  entry
-                                  logIndex
-                                  serverType
-                                  stateMachineData
-                                  output.
-                           name
-                           -> RaftData
-                                Term name entry logIndex serverType stateMachineData output
-                           -> Term
-                           -> name
-                           -> LogIndex
-                           -> Term
-                           -> (RaftData
-                                 Term name entry logIndex serverType stateMachineData output,
-                               Msg)
-handleRequestVote _me state t _candidateId _lastLogIndex _lastLogTerm =
-   if currentTerm state > t then
-      (state,RequestVoteReply (currentTerm state) False)
-      else undefined
+handleRequestVote :: forall name stateMachineData output . (Eq name)
+                  => RaftData Term name Entry LogIndex ServerType stateMachineData output
+                  -> Term
+                  -> name
+                  -> LogIndex
+                  -> Term
+                  -> (RaftData Term name Entry LogIndex ServerType stateMachineData output
+                     , Msg)
+handleRequestVote me state t candidateId lastLogIndex lastLogTerm =
+   if currentTerm state > t
+   then
+     (state, RequestVoteReply (currentTerm state) False)
+   else
+     let
+       state' = (advanceCurrentTerm state t)
+     in
+       -- audit this isNothing vs isJust
+       if (isNothing (leaderId state)) && (moreUpToDate lastLogTerm lastLogIndex (maxTerm (log state)) (maxIndex (log state)))
+       then
+         case votedFor state of
+           Nothing           -> (state' {votedFor = Just candidateId}
+                                ,RequestVoteReply (currentTerm state) True)
+           Just candidateId' -> (state', RequestVoteReply (currentTerm state) (candidateId == candidateId'))
+       else
+         (state', RequestVoteReply (currentTerm state) False)
 
 div2 :: Natural -> Natural
 div2 1 = 0
