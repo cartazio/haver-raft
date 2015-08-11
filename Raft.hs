@@ -401,5 +401,33 @@ applyEntries h st entries =
                   in
                     (out' ++ out'', state)
 
+doGenericServer :: forall term name serverType stateMachineData .
+                         Name
+                         -> RaftData
+                              term name Entry LogIndex serverType stateMachineData Output
+                         -> ([RaftOutput],
+                             RaftData
+                               term name Entry LogIndex serverType stateMachineData Output,
+                             [(Name,Msg)])
+doGenericServer h state =
+    let (out, state') = applyEntries h state
+                      (reverse
+                         $ filter (\x ->  lastApplied state <  eIndex x
+                                      && eIndex x <= commitIndex state)
+                         $ findGtIndex (log state) (lastApplied state))
+     in
+          (out , state'{lastApplied= if commitIndex state' > lastApplied state'  then commitIndex state else lastApplied state}, [])
 
-
+replicaMessage :: forall name serverType stateMachineData output.
+                        Eq name =>
+                        RaftData
+                          Term name Entry LogIndex serverType stateMachineData output
+                        -> Name -> name -> (name, Msg)
+replicaMessage state me host =
+  let prevIndex = pred (getNextIndex state host) in
+   let prevTerm = case findAtIndex (log state) prevIndex of
+                    Just e -> eTerm e
+                    Nothing -> 0
+    in
+      let newEntries = findGtIndex  (log state) prevIndex in
+         (host, AppendEntries (currentTerm state) me prevIndex prevTerm newEntries (commitIndex state))
