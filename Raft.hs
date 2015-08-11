@@ -329,11 +329,11 @@ catchApplyEntry :: forall term name entry logIndex serverType stateMachineData
                    ,RaftData term name entry logIndex serverType stateMachineData Output)
 catchApplyEntry st e =
   case getLastId st (eClient e) of
-    Just (id, o) -> if eId e < id
+    Just (id', o) -> if unLogIndex (eId e) < id'
                     then
                       ([], st)
                     else
-                      if eId e == id
+                      if unLogIndex (eId e) == id'
                       then
                         ([o], st)
                       else
