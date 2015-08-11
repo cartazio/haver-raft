@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ScopedTypeVariables, GeneralizedNewtypeDeriving #-}
 
 module VerdiRaft.Raft where
 
@@ -11,9 +11,9 @@ import VerdiRaft.RaftData as RD
 
 type Term =  Natural
 
-newtype LogIndex = LogIndex { unLogIndex :: Natural } deriving (Eq,Ord, Show)
+newtype LogIndex = LogIndex { unLogIndex :: Natural } deriving (Eq,Ord, Show,Num)
 
-newtype Name = Name { unName :: Natural  } deriving (Eq,  Ord, Show)
+newtype Name = Name { unName :: Natural  } deriving (Eq,  Ord, Show,Num)
 
 data Input = Input deriving (Eq,Ord,Show)
 data Output = Output deriving (Eq,Ord,Show)
@@ -61,7 +61,9 @@ findGtIndex (e:es) i
   | otherwise = []
 
 removeAfterIndex :: [Entry] -> LogIndex  -> [Entry]
-removeAfterIndex = undefined
+removeAfterIndex [] _ = []
+removeAfterIndex (e:es) i |  eIndex e <= i = e : es
+                          | otherwise = removeAfterIndex es i
 
 maxIndex :: [Entry] -> LogIndex
 maxIndex [] = LogIndex 0
@@ -84,9 +86,9 @@ advanceCurrentTerm state newTerm
                     }
       | otherwise = state
 
-getNextIndex :: forall term name logIndex serverType stateMachineData output . (Eq name, Eq logIndex)
-             => RaftData term name Entry logIndex serverType stateMachineData output
-             -> [([(name, logIndex)], LogIndex)]
+getNextIndex :: forall term name  serverType stateMachineData output . (Eq name)
+             => RaftData term name Entry LogIndex serverType stateMachineData output
+             -> [([(name, LogIndex)], LogIndex)]
              -> LogIndex
 getNextIndex state h = maybe (maxIndex (RD.log state)) id $ lookup (RD.nextIndex state) h
 
@@ -128,7 +130,7 @@ handleAppendEntries :: Name
                     -> LogIndex
                     -> ( RaftData Term Name Entry LogIndex ServerType stateMachineData output
                        , Msg)
-handleAppendEntries me state t leaderId prevLogIndex prevLogTerm entries leaderCommit =
+handleAppendEntries _me state t mleaderId prevLogIndex prevLogTerm entries leaderCommit =
     if currentTerm state > t then
        (state, AppendEntriesReply (currentTerm state) entries False)
     else if haveNewEntries state entries then
@@ -136,7 +138,7 @@ handleAppendEntries me state t leaderId prevLogIndex prevLogTerm entries leaderC
               RD.log      = entries
              ,commitIndex = max (commitIndex state) (min leaderCommit (maxIndex entries ))
              ,rdType      = Follower
-             ,leaderId    = Just leaderId }
+             ,leaderId    = Just mleaderId }
         , AppendEntriesReply t entries True)
     else case findAtIndex (RD.log state) prevLogIndex of
       Nothing -> (state, AppendEntriesReply (currentTerm state) entries False)
@@ -152,12 +154,46 @@ handleAppendEntries me state t leaderId prevLogIndex prevLogTerm entries leaderC
                          log         = log''
                         ,commitIndex = max (commitIndex state) (min leaderCommit (maxIndex log''))
                         ,rdType      = Follower
-                        ,leaderId    = Just leaderId}
+                        ,leaderId    = Just mleaderId}
                   , AppendEntriesReply t entries True)
             else ( (advanceCurrentTerm state t) {
                          rdType = Follower
-                        ,leaderId = Just leaderId}
+                        ,leaderId = Just mleaderId}
                  , AppendEntriesReply t entries True)
 
 
+listupsert :: Eq k => [(k,v)] -> k -> v -> [(k,v)]
+listupsert [] k v = [(k,v)]
+listupsert (a@(k1,_):as) k v | k1 == k = (k1,v) : as
+                            | otherwise = a : listupsert as k v
+
+assoc_set:: Eq k => [(k,v)] -> k -> v -> [(k,v)]
+assoc_set = listupsert
+
+assoc_default :: Eq k => [(k,v)] -> k -> v -> v
+assoc_default ls k def = maybe def id $ lookup  k ls
+
+handleAppendEntriesReply :: Eq name =>
+                                     name
+                                  -> RaftData
+                                       term name Entry LogIndex serverType stateMachineData output
+                                  -> name
+                                  -> term
+                                  -> [Entry]
+                                  -> Bool
+                                  -> (RaftData
+                                        term name Entry LogIndex serverType stateMachineData output
+                                    ,[(name,Msg)] )
+handleAppendEntriesReply  me state src term entries result =
+    if currentTerm state == term then
+      if result then
+        let index = maxIndex entries in
+          (state{matchIndex=  assoc_set (matchIndex state) src
+                  $ max (assoc_default (matchIndex state) src 0) index
+                ,nextIndex= assoc_set (nextIndex state) src $
+                            max (getNextIndex state src :: LogIndex) (1 + index :: LogIndex) }
+            ,[])
+
+          else undefined
+          else undefined
 
