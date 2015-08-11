@@ -10,6 +10,7 @@ import Data.Data (Data,Typeable)
 import GHC.Generics (Generic)
 --import Data.Set(Set)
 import Data.Maybe (isJust)
+import Data.Foldable (foldl')
 
 data RaftData term name entry logIndex serverType stateMachineData output =
     RaftData {
@@ -431,3 +432,57 @@ replicaMessage state me host =
     in
       let newEntries = findGtIndex  (log state) prevIndex in
          (host, AppendEntries (currentTerm state) me prevIndex prevTerm newEntries (commitIndex state))
+
+haveQuorum :: forall
+                           term
+                           entry
+                           serverType
+                           stateMachineData
+                           output.
+                    RaftData term Name entry LogIndex serverType stateMachineData output
+                    -> Name -> LogIndex -> Bool
+haveQuorum state  _me n   =
+   div2 (fromIntegral $ length nodes)
+        < (fromIntegral $ length $ filter (\h -> n <= assocDefault (matchIndex state) h 0 ) nodes)
+
+advanceCommitIndex :: forall serverType stateMachineData output.
+                            RaftData
+                              Term Name Entry LogIndex serverType stateMachineData output
+                            -> Name
+                            -> RaftData
+                                 Term Name Entry LogIndex serverType stateMachineData output
+advanceCommitIndex state me  =
+   let entriesToCommit =  filter
+             (\ e  -> (currentTerm state == eTerm e)
+                               && (commitIndex state < eIndex e )
+                               && (haveQuorum state me (eIndex e) ) )
+             (findGtIndex (log state) (commitIndex state) )
+     in
+        state{commitIndex=(\ a c b -> foldl' a b c ) max (map eIndex entriesToCommit) (commitIndex state)}
+
+doLeader :: forall stateMachineData output .
+                  RaftData
+                    Term Name Entry LogIndex ServerType stateMachineData output
+                  -> Name
+                  -> ([RaftOutput],
+                      RaftData
+                        Term Name Entry LogIndex ServerType stateMachineData output,
+                      [(Name, Msg)])
+doLeader  state me =
+    case rdType state  of
+      Leader -> let state' = advanceCommitIndex state me in
+          if shouldSend state' then
+              let state'' = state'{shouldSend = False} in
+              let replicaMessages = map (replicaMessage state'' me)
+                                        (filter
+                                          (\ h -> if me == h then False else True) nodes )
+                in
+                   ([], state'', replicaMessages)
+               else
+                ([], state',[])
+      Candidate  -> ([], state,[])
+      Follower -> ([],state,[])
+
+
+raftNetHandler  me src m state =
+
