@@ -164,8 +164,7 @@ handleAppendEntries _me state t mleaderId prevLogIndex prevLogTerm entries leade
                   , AppendEntriesReply t entries True)
             else ( (advanceCurrentTerm state t) {
                          rdType = Follower
-                        ,leaderId = Just mleaderId}
-                 , AppendEntriesReply t entries True)
+                        ,leaderId = Just mleaderId}                 , AppendEntriesReply t entries True)
 
 
 listupsert :: Eq k => [(k,v)] -> k -> v -> [(k,v)]
@@ -227,14 +226,15 @@ moreUpToDate :: forall a a1.
 moreUpToDate t1 i1 t2 i2 = (t1 > t2 ) || ((t1 == t2) && (i1 >= i2))
 
 
-handleRequestVote :: forall name stateMachineData output . (Eq name)
-                  => RaftData Term name Entry LogIndex ServerType stateMachineData output
+handleRequestVote :: Eq name
+                  => name
+                  -> RaftData Term name Entry logIndex ServerType stateMachineData output
                   -> Term
                   -> name
                   -> LogIndex
                   -> Term
-                  -> (RaftData Term name Entry LogIndex ServerType stateMachineData output
-                     , Msg)
+                  -> (RaftData Term name Entry logIndex ServerType stateMachineData output
+                     ,Msg)
 handleRequestVote me state t candidateId lastLogIndex lastLogTerm =
    if currentTerm state > t
    then
@@ -244,14 +244,15 @@ handleRequestVote me state t candidateId lastLogIndex lastLogTerm =
        state' = (advanceCurrentTerm state t)
      in
        -- audit this isNothing vs isJust
-       if (isNothing (leaderId state)) && (moreUpToDate lastLogTerm lastLogIndex (maxTerm (log state)) (maxIndex (log state)))
+       if (if isJust (leaderId state') then False else True)
+          && (moreUpToDate lastLogTerm lastLogIndex (maxTerm (log state')) (maxIndex (log state')))
        then
-         case votedFor state of
+         case votedFor state' of
            Nothing           -> (state' {votedFor = Just candidateId}
                                 ,RequestVoteReply (currentTerm state) True)
            Just candidateId' -> (state', RequestVoteReply (currentTerm state) (candidateId == candidateId'))
        else
-         (state', RequestVoteReply (currentTerm state) False)
+         (state', RequestVoteReply (currentTerm state') False)
 
 div2 :: Natural -> Natural
 div2 1 = 0
