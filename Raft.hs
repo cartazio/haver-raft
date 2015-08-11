@@ -1,40 +1,39 @@
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE ScopedTypeVariables, GeneralizedNewtypeDeriving, KindSignatures #-}
-{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE DeriveDataTypeable         #-}
+{-# LANGUAGE DeriveGeneric              #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE KindSignatures             #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
 
 module VerdiRaft.Raft where
 
-import Numeric.Natural
-import Prelude hiding (log,pred)
-import Data.Data (Data,Typeable)
-import GHC.Generics (Generic)
---import Data.Set(Set)
-import Data.Maybe (isJust)
-import Data.Foldable (foldl')
+import           Data.Data       (Data, Typeable)
+import           GHC.Generics    (Generic)
+import           Numeric.Natural
+import           Prelude         hiding (log, pred)
+import           Data.Foldable   (foldl')
+import           Data.Maybe      (isJust)
 
 data RaftData term name entry logIndex serverType stateMachineData output =
     RaftData {
     -- persistent
-      currentTerm :: term
-      ,votedFor :: Maybe name
-      ,leaderId :: Maybe name
-      ,log :: [entry]
+      currentTerm         :: term
+      ,votedFor           :: Maybe name
+      ,leaderId           :: Maybe name
+      ,log                :: [entry]
       -- volatile
-      ,commitIndex :: logIndex
-      ,lastApplied :: logIndex
-      ,stateMachine :: stateMachineData
+      ,commitIndex        :: logIndex
+      ,lastApplied        :: logIndex
+      ,stateMachine       :: stateMachineData
       -- leader state
-      ,nextIndex :: [(name,logIndex)]
-      ,matchIndex :: [(name,logIndex)]
-      ,shouldSend :: Bool
+      ,nextIndex          :: [(name,logIndex)]
+      ,matchIndex         :: [(name,logIndex)]
+      ,shouldSend         :: Bool
       -- candidate state
-      ,votesReceived :: [name]
+      ,votesReceived      :: [name]
       -- whoami
-      ,rdType :: serverType
+      ,rdType             :: serverType
       -- client request state
-      ,clientCache :: [(ECLIENT,(EID,output))]
-          -- this might be wrong, original version is nat and nat instead of logindex log index
-
+      ,clientCache        :: [(ECLIENT,(EID,output))]
       -- ghost variables ---- but do we care?
       ,electoralVictories :: [(term,[name],[entry])]
 
@@ -56,18 +55,22 @@ data Output = Output deriving (Eq,Ord,Show)
 nodes ::  [Name]
 nodes = undefined
 
+--- the verdi raft doesn't deal with this, which we'll need to wrap in MonadIO or whatever
+initState :: forall stateMachineData . stateMachineData
+initState = undefined
+
 newtype ECLIENT = ECLIENT { unECLIENT :: Natural }
     deriving (Read, Eq, Show, Ord, Num, Data, Typeable, Generic)
 newtype EID = EID { unEID :: Natural }
     deriving (Read, Eq, Show, Ord, Num, Data, Typeable, Generic)
 
 data Entry = Entry {
-   eAt :: Name
+   eAt     :: Name
   ,eClient :: ECLIENT -- should this be Name?
-  ,eId :: EID
-  ,eIndex :: LogIndex
-  ,eTerm :: Term
-  ,eInput :: Input
+  ,eId     :: EID
+  ,eIndex  :: LogIndex
+  ,eTerm   :: Term
+  ,eInput  :: Input
   } deriving (Eq,Ord,Show )
 
 data Msg = RequestVote Term Name LogIndex Term
@@ -595,9 +598,9 @@ reboot state =
              (clientCache state)
              (electoralVictories state)
 
-initHandlers :: forall term name entry logIndex serverType stateMachineData output
-             .  RaftData term name entry logIndex serverType stateMachineData output
-             -> RaftData term name entry logIndex ServerType stateMachineData output
+initHandlers :: forall name entry serverType stateMachineData output
+             .  RaftData Term name entry LogIndex serverType stateMachineData output
+             -> RaftData Term name entry LogIndex ServerType stateMachineData output
 initHandlers _name =
     RaftData 0
              Nothing
@@ -605,7 +608,7 @@ initHandlers _name =
              []
              0
              0
-             init
+             initState
              []
              []
              False
