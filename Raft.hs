@@ -590,7 +590,7 @@ reboot state =
              (electoralVictories state)
 
 initHandlers :: forall name entry serverType stateMachineData output
-             .  RaftData Term name entry LogIndex serverType stateMachineData output
+             .  name
              -> RaftData Term name entry LogIndex ServerType stateMachineData output
 initHandlers _name =
     RaftData 0
