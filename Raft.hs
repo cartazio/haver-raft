@@ -4,7 +4,7 @@
 {-# LANGUAGE KindSignatures             #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 
-module Network.Consensus.Verified.Raft where
+module VerdiRaft.Raft where
 
 import Data.Data (Data, Typeable)
 import GHC.Generics (Generic)
