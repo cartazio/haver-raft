@@ -224,7 +224,7 @@ assocSet = listupsert
 assocDefault :: Eq k => [(k,v)] -> k -> v -> v
 assocDefault ls k def = maybe def id $ lookup k ls
 
-pred :: (Num a, Ord a ,Eq a) => a -> a
+pred :: (Num a, Ord a) => a -> a
 pred n | n <= 0 = 0
        | otherwise = n -1
 
