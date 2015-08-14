@@ -70,6 +70,8 @@ library
   ghc-options:         -Wall
   -- Other library packages from which modules are imported.
   build-depends:       base >=4.8 && <4.9
+                      , bytes >= 0.15 && < 0.16
+                      , profunctors
 
   -- Directories containing source files.
   hs-source-dirs:      src
