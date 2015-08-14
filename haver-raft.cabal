@@ -40,6 +40,7 @@ copyright: Carter Tazio Schonwald and William J Martino
 
 category:            Network
 
+-- Constraint on the version of Cabal needed to build this package.
 cabal-version:       >=1.10
 
 build-type:          Simple
@@ -54,7 +55,6 @@ source-repository head
   type: git
   location: git://github.com/cartazio/haver-raft
 
--- Constraint on the version of Cabal needed to build this package.
 
 
 
@@ -71,7 +71,8 @@ library
   -- Other library packages from which modules are imported.
   build-depends:       base >=4.8 && <4.9
                       , bytes >= 0.15 && < 0.16
-                      , profunctors
+                      , profunctors >= 5.1 && < 5.2
+                      ,reflection >= 2 && < 2.1
 
   -- Directories containing source files.
   hs-source-dirs:      src

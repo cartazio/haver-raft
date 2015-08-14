@@ -4,6 +4,7 @@
 --{-# LANGUAGE KindSignatures             #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 --{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module Network.Consensus.Verified.Raft where
 
@@ -17,7 +18,7 @@ import Data.Bytes.Serial
 
 import Data.Profunctor
 import qualified Control.Category as CC
-
+import Data.Reflection
 
 
 data RaftData term name  logIndex stateMachineData input output =
@@ -402,78 +403,79 @@ getLastId :: forall  term name   stateMachineData input output
           -> Maybe (EID, output)
 getLastId state client = assoc (clientCache state) client
 
-handler :: forall dataa input output. input  -> dataa -> (output,dataa)
-handler = error "fill me out/ abstract meeeee "
+handler :: forall s m input output state prox  .  (Reifies   s (StateMachine m input state (output, state))) =>  prox s -> input  ->  state -> m (output,state)
+handler p  input state = ( stepSM $ reflect p ) state input
 
-applyEntry :: forall term name   output input stateMachineData
-           .  RaftData term name  LogIndex stateMachineData input output
+applyEntry :: forall term name s  output input stateMachineData m prox
+           . (Monad m,   (Reifies   s (StateMachine m input stateMachineData (output, stateMachineData))))
+           => prox s ->   RaftData term name  LogIndex stateMachineData input output
            -> Entry input
-           -> ([output]
+           -> m ([output]
               ,RaftData term name  LogIndex stateMachineData input output)
-applyEntry st e = let
-    (out,d) = handler (eInput e) (stateMachine st)
-  in
-    ([out]
-    ,st {clientCache = assocSet (clientCache st) (eClient e) (eId e, out)
-        ,stateMachine = d})
+applyEntry p  st e = do
+    (out,d) <- handler  p (eInput e) (stateMachine st)
+    return ([out]
+            ,st {clientCache = assocSet (clientCache st) (eClient e) (eId e, out)
+            ,stateMachine = d})
 
 
-catchApplyEntry :: forall term name   stateMachineData input output
-                .  RaftData term name  LogIndex stateMachineData input output
+catchApplyEntry :: forall term name   stateMachineData input output m p s
+                .  (Monad m, (Reifies   s (StateMachine m input stateMachineData (output, stateMachineData))))
+                 => p s
+                -> RaftData term name  LogIndex stateMachineData input output
                 -> Entry input
-                -> ([output]
+                ->  m ([output]
                    ,RaftData term name  LogIndex stateMachineData input output)
-catchApplyEntry st e =
+catchApplyEntry p  st e =
   case getLastId st (eClient e) of
     Just (id', o) -> if  (eId e) < id'
                     then
-                      ([], st)
+                     return  ([], st)
                     else
                       if  (eId e) == id'
                       then
-                        ([o], st)
+                        return  ([o], st)
                       else
-                        applyEntry st e
-    Nothing      -> applyEntry st e
+                        applyEntry p  st e
+    Nothing      -> applyEntry p st e
 
-applyEntries :: forall term name   stateMachineData input output
-             . Name
+applyEntries :: forall term name   stateMachineData input output m p s
+             .  (Monad m, (Reifies   s (StateMachine m input stateMachineData (output, stateMachineData))))
+             => p s
+             -> Name
              -> RaftData term name  LogIndex stateMachineData input output
              -> [Entry input]
-             -> ([RaftOutput output]
+             -> m  ([RaftOutput output]
                 ,RaftData term name  LogIndex stateMachineData input output)
-applyEntries h st entries =
+applyEntries p h st entries =
   case entries of
-    []     -> ([], st)
-    (e:es) -> let
-                (out, st') = catchApplyEntry st e
-              in
-                let
-                  out' = if eAt e == h
+    []     -> return  ([], st)
+    (e:es) -> do
+                (out, st') <-  catchApplyEntry p  st e
+                let out' = if eAt e == h
                          then
                            fmap (\o -> ClientResponse (eClient e) (eId e) o) out
                          else
                            []
-                in
-                  let
-                    (out'', state) = applyEntries h st' es
-                  in
-                    (out' ++ out'', state)
 
-doGenericServer :: forall term name stateMachineData input output
-                .  Name
+                (out'', state)<- applyEntries p h st' es
+                return  (out' ++ out'', state)
+
+doGenericServer :: forall term name stateMachineData input output p s m
+                . (Monad m, (Reifies   s (StateMachine m input stateMachineData (output, stateMachineData))))
+                => p s
+                -> Name
                 -> RaftData term name LogIndex stateMachineData input output
-                -> ([RaftOutput output]
+                -> m  ([RaftOutput output]
                    ,RaftData term name LogIndex stateMachineData input output
                    ,[(Name,Msg input)])
-doGenericServer h state =
-    let (out, state') = applyEntries h state
-                      (reverse
+doGenericServer p  h state =
+    do  (out, state') <- applyEntries p  h state
+                         (reverse
                          $ filter (\x ->  lastApplied state <  eIndex x
                                       && eIndex x <= commitIndex state)
                          $ findGtIndex (log state) (lastApplied state))
-     in
-          (out , state'{lastApplied= if commitIndex state' > lastApplied state'  then commitIndex state else lastApplied state}, [])
+        return (out , state'{lastApplied= if commitIndex state' > lastApplied state'  then commitIndex state else lastApplied state}, [])
 
 replicaMessage :: forall name stateMachineData input output
                .  Eq name
@@ -539,27 +541,27 @@ doLeader state me =
       Candidate  -> ([], state,[])
       Follower -> ([],state,[])
 
-raftNetHandler :: forall stateMachineData input output
-               . Name
+raftNetHandler :: forall stateMachineData input output m p s
+               . (Monad m, (Reifies   s (StateMachine m input stateMachineData (output, stateMachineData))))
+               => p s
+                -> Name
                -> Name
                -> Msg input
                -> RaftData Term Name  LogIndex stateMachineData input output
-               -> ([RaftOutput output]
+               -> m  ([RaftOutput output]
                   ,RaftData Term Name  LogIndex stateMachineData input output
                   ,[(Name, Msg input)])
-raftNetHandler me src m state =
+raftNetHandler p  me src m state =
   let
     (state', pkts) = handleMessage src me m state
   in
-    let
-      (genericeOut, state'', genericPkts) = doGenericServer me state'
-    in
+    do
+      (genericeOut, state'', genericPkts) <-  doGenericServer p  me state'
       let
         (leaderOut, state''', leaderPkts) = doLeader state'' me
-      in
-        (genericeOut ++ leaderOut
-        ,state'''
-        ,pkts ++ genericPkts ++ leaderPkts)
+      return  (genericeOut ++ leaderOut
+              ,state'''
+              ,pkts ++ genericPkts ++ leaderPkts)
 
 handleClientRequest :: forall stateMachineData input  output
                     .  Name
@@ -607,26 +609,26 @@ handleInput me inp state =
     ClientRequest client id' c -> handleClientRequest me state client id' c
     Timeout -> handleTimeout me state
 
-raftInputHandler :: forall stateMachineData input output
-                 . Name
+raftInputHandler :: forall stateMachineData input output p s m
+                 . (Monad m, (Reifies   s (StateMachine m input stateMachineData (output, stateMachineData))))
+                 => p s
+                 -> Name
                  -> RaftInput input
                  -> RaftData Term Name  LogIndex  stateMachineData input output
-                 -> ([RaftOutput output]
+                 -> m ([RaftOutput output]
                     ,RaftData Term Name LogIndex  stateMachineData input output
                     ,[(Name, Msg input)])
-raftInputHandler me inp state =
+raftInputHandler p me inp state =
     let
       (handlerOut, state', pkts) = handleInput me inp state
     in
-      let
-        (genericOut, state'', genericPkts) = doGenericServer me state'
-      in
-        let
-          (leaderOut, state''', leaderPkts) = doLeader state'' me
-        in
-          (handlerOut ++ genericOut ++ leaderOut
-          ,state'''
-          ,pkts ++ genericPkts ++ leaderPkts)
+      do (genericOut, state'', genericPkts) <-  doGenericServer p  me state'
+         let
+            (leaderOut, state''', leaderPkts) = doLeader state'' me
+         return $
+              (handlerOut ++ genericOut ++ leaderOut
+              ,state'''
+              ,pkts ++ genericPkts ++ leaderPkts)
 
 reboot :: forall term name  logIndex  stateMachineData input output
        .  RaftData term name  logIndex  stateMachineData input output
