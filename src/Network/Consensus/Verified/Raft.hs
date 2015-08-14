@@ -8,12 +8,13 @@
 
 module Network.Consensus.Verified.Raft where
 
+import Control.Applicative
 import Data.Data (Data, Typeable)
 import GHC.Generics (Generic)
 import Numeric.Natural
 import Prelude hiding (log,sin, pred)
 import Data.Foldable (foldl')
-import Data.Maybe (isJust)
+import Data.Maybe (isNothing, fromMaybe)
 import Data.Bytes.Serial
 
 import Data.Profunctor
@@ -55,25 +56,25 @@ instance (Serial term , Serial name,Serial logIndex,Serial stateMachine
 -- | StateMachine is  ... a state machine
 -- in this code base it'd used as @StateMachine state input (output,state)@
 -- where state == stateMachineData
-data StateMachine m   message stateIn stateOut  =
+data StateMachine m message stateIn stateOut =
     StateMachine   {
       stepSM :: stateIn -> message -> m  stateOut
   }
 
 instance Functor m => Profunctor (StateMachine m  message) where
    dimap fin fout (StateMachine step) =
-        StateMachine  (\ sin msg ->   fmap  fout $ step  (fin   sin) msg  )
+        StateMachine (\ sin msg -> fout <$> step (fin sin) msg)
 
 
 instance Functor m => Functor (StateMachine m  message stateIn) where
   fmap f (StateMachine step) =
-          StateMachine  (\ sin msg -> fmap  f $ step sin msg )
+          StateMachine (\ sin msg -> f <$> step sin msg)
 
 
 instance (Monad m) => CC.Category (StateMachine m  message) where
     id = StateMachine ( \ x _ ->  pure x)
     (.)  (StateMachine step2) (StateMachine step1) =
-        StateMachine  (\ sin msg -> do  r <- step1 sin msg ; step2 r msg)
+        StateMachine  (\ sin msg -> step1 sin msg >>= flip step2 msg)
 
 
 
@@ -88,7 +89,7 @@ newtype OrphNatural = OrphNatural { unOrphNatural :: Natural }
    deriving (Eq, Show,Ord,Enum,Num,Integral,Generic,Data,Real,Read)
 instance Serial OrphNatural where
     serialize (OrphNatural n)= serialize $ show n
-    deserialize = fmap read $ deserialize
+    deserialize = read <$> deserialize
 
 newtype LogIndex = LogIndex { unLogIndex :: OrphNatural }
     deriving (Read,Eq,Show,Ord,Num,Data,Typeable,Generic)
@@ -213,7 +214,7 @@ tryToBecomeLeader me state =
     ,map (\node -> (node, RequestVote t me
                             (maxIndex (log state))
                             (maxTerm (log state)))
-         ) $ filter (\h -> h == me) nodes)
+         ) $ filter (== me) nodes)
         where
           t :: Term
           t = 1 + currentTerm state
@@ -241,36 +242,33 @@ handleAppendEntries :: Name
                     -> LogIndex
                     -> (RaftData Term Name  LogIndex  stateMachineData input output
                        ,Msg input)
-handleAppendEntries _me state t mleaderId prevLogIndex prevLogTerm entries leaderCommit =
-    if currentTerm state > t then
-       (state, AppendEntriesReply (currentTerm state) entries False)
-    else if haveNewEntries state entries then
+handleAppendEntries _me state t mleaderId prevLogIndex prevLogTerm entries leaderCommit
+    | currentTerm state > t = (state, AppendEntriesReply (currentTerm state) entries False)
+    | haveNewEntries state entries = 
         ((advanceCurrentTerm state t) {
               log      = entries
              ,commitIndex = max (commitIndex state) (min leaderCommit (maxIndex entries ))
              ,rdType      = Follower
              ,leaderId    = Just mleaderId }
         ,AppendEntriesReply t entries True)
-    else case findAtIndex (log state) prevLogIndex of
-      Nothing -> (state, AppendEntriesReply (currentTerm state) entries False)
-      Just e ->
-        if prevLogTerm /= eTerm e then (state, AppendEntriesReply (currentTerm state) entries False)
-          else if haveNewEntries  state entries
-            then
-              let
-                log' = removeAfterIndex (log state) prevLogIndex
-                log'' = entries ++ log'
-                 in
-                  ((advanceCurrentTerm state t) {
-                         log         = log''
-                        ,commitIndex = max (commitIndex state) (min leaderCommit (maxIndex log''))
-                        ,rdType      = Follower
-                        ,leaderId    = Just mleaderId}
-                  ,AppendEntriesReply t entries True)
-            else ((advanceCurrentTerm state t) {
-                         rdType   = Follower
-                        ,leaderId = Just mleaderId}
-                 ,AppendEntriesReply t entries True)
+    | otherwise = case findAtIndex (log state) prevLogIndex of
+        Nothing -> (state, AppendEntriesReply (currentTerm state) entries False)
+        Just e | prevLogTerm /= eTerm e -> (state, AppendEntriesReply (currentTerm state) entries False)
+                | haveNewEntries state entries ->
+                    let
+                        log' = removeAfterIndex (log state) prevLogIndex
+                        log'' = entries ++ log'
+                    in
+                    ((advanceCurrentTerm state t) {
+                            log         = log''
+                            ,commitIndex = max (commitIndex state) (min leaderCommit (maxIndex log''))
+                            ,rdType      = Follower
+                            ,leaderId    = Just mleaderId}
+                    ,AppendEntriesReply t entries True)
+                | otherwise -> ((advanceCurrentTerm state t) {
+                            rdType   = Follower
+                            ,leaderId = Just mleaderId}
+                            ,AppendEntriesReply t entries True)
 
 listupsert :: Eq k => [(k,v)] -> k -> v -> [(k,v)]
 listupsert [] k v = [(k,v)]
@@ -281,7 +279,7 @@ assocSet:: Eq k => [(k,v)] -> k -> v -> [(k,v)]
 assocSet = listupsert
 
 assocDefault :: Eq k => [(k,v)] -> k -> v -> v
-assocDefault ls k def = maybe def id $ lookup k ls
+assocDefault ls k def = fromMaybe def $ lookup k ls
 
 pred :: (Num a, Ord a) => a -> a
 pred n | n <= 0 = 0
@@ -297,31 +295,22 @@ handleAppendEntriesReply :: forall t term name stateMachineData input output
                          -> Bool
                          -> (RaftData term name  LogIndex  stateMachineData input output
                             ,[(name,Msg input)])
-handleAppendEntriesReply _me state src term entries result =
-    if currentTerm state == term then
-      if result then
-        let index = maxIndex entries in
-          (state {matchIndex =
-                   assocSet (matchIndex state) src $ max (assocDefault (matchIndex state) src 0) index
-                 ,nextIndex =
-                   assocSet (nextIndex state) src (max (getNextIndex state src ) (1 + index) :: LogIndex)}
-          ,[])
+handleAppendEntriesReply _me state src term entries result
+  | currentTerm state == term && result = let index = maxIndex entries in
+        (state {matchIndex =
+                assocSet (matchIndex state) src $ max (assocDefault (matchIndex state) src 0) index
+                ,nextIndex =
+                assocSet (nextIndex state) src (max (getNextIndex state src ) (1 + index) :: LogIndex)}
+        ,[])
+  | currentTerm state == term && not result =
+        (state{nextIndex = assocSet (nextIndex state) src $ pred (getNextIndex state src)}
+        ,[])
+   | currentTerm state < term = (state,[]) -- follower behind, ignore
+   | otherwise = (advanceCurrentTerm state term, []) -- leader behind, convert to follower
 
-          else
-            (state{nextIndex = assocSet (nextIndex state) src $ pred (getNextIndex state src)}
-            ,[])
-
-          else if currentTerm state < term then
-            -- follower behind, ignore
-            (state,[])
-          else -- leader behind, convert to follower
-            (advanceCurrentTerm state term, [])
-
-moreUpToDate :: forall a a1.
-                      (Ord a, Ord a1) =>
-                      a -> a1 -> a -> a1 -> Bool
+moreUpToDate :: forall a a1 . (Ord a, Ord a1)
+             => a -> a1 -> a -> a1 -> Bool
 moreUpToDate t1 i1 t2 i2 = (t1 > t2 ) || ((t1 == t2) && (i1 >= i2))
-
 
 handleRequestVote :: Eq name
                   => name
@@ -332,20 +321,16 @@ handleRequestVote :: Eq name
                   -> Term
                   -> (RaftData Term name  logIndex  stateMachineData input output
                      ,Msg input)
-handleRequestVote _me state t candidateId lastLogIndex lastLogTerm =
-   if currentTerm state > t
-   then
-     (state, RequestVoteReply (currentTerm state) False)
-   else
+handleRequestVote _me state t candidateId lastLogIndex lastLogTerm
+  | currentTerm state > t = (state, RequestVoteReply (currentTerm state) False)
+  | otherwise =
      let
        state' = advanceCurrentTerm state t
      in
-       if (if isJust (leaderId state') then False else True)
-          && moreUpToDate lastLogTerm lastLogIndex (maxTerm (log state')) (maxIndex (log state'))
+       if isNothing (leaderId state') && moreUpToDate lastLogTerm lastLogIndex (maxTerm (log state')) (maxIndex (log state'))
        then
          case votedFor state' of
-           Nothing           -> (state' {votedFor = Just candidateId}
-                                ,RequestVoteReply (currentTerm state) True)
+           Nothing           -> (state' {votedFor = Just candidateId}, RequestVoteReply (currentTerm state) True)
            Just candidateId' -> (state', RequestVoteReply (currentTerm state) (candidateId == candidateId'))
        else
          (state', RequestVoteReply (currentTerm state') False)
@@ -355,7 +340,7 @@ div2 1 = 0
 div2 0 = 0
 div2 n = 1 +  div2 (n-2)
 
-wonElection :: forall t  a. Foldable t => t a -> Bool
+wonElection :: forall t a. Foldable t => t a -> Bool
 wonElection votes = 1 + div2 (fromIntegral $ length nodes) <= fromIntegral (length votes)
 
 handleRequestVoteReply :: forall term name logIndex stateMachineData input output
@@ -366,9 +351,9 @@ handleRequestVoteReply :: forall term name logIndex stateMachineData input outpu
                        -> term
                        -> Bool
                        -> RaftData term name logIndex  stateMachineData input output
-handleRequestVoteReply _me state _src t _voted =
-    if t > currentTerm state then (advanceCurrentTerm state t){rdType = Follower}
-      else undefined
+handleRequestVoteReply _me state _src t _voted
+  | t > currentTerm state = (advanceCurrentTerm state t){rdType = Follower}
+  | otherwise = undefined
 
 handleMessage :: forall stateMachineData output input
               .  Name
@@ -401,7 +386,7 @@ getLastId :: forall  term name   stateMachineData input output
           .  RaftData term name  LogIndex stateMachineData input  output
           -> ECLIENT
           -> Maybe (EID, output)
-getLastId state client = assoc (clientCache state) client
+getLastId state = assoc (clientCache state)
 
 handler :: forall s m input output state prox  .  (Reifies   s (StateMachine m input state (output, state))) =>  prox s -> input  ->  state -> m (output,state)
 handler p  input state = ( stepSM $ reflect p ) state input
@@ -428,16 +413,11 @@ catchApplyEntry :: forall term name   stateMachineData input output m p s
                    ,RaftData term name  LogIndex stateMachineData input output)
 catchApplyEntry p  st e =
   case getLastId st (eClient e) of
-    Just (id', o) -> if  (eId e) < id'
-                    then
-                     return  ([], st)
-                    else
-                      if  (eId e) == id'
-                      then
-                        return  ([o], st)
-                      else
-                        applyEntry p  st e
-    Nothing      -> applyEntry p st e
+    Just (id', o)
+      | eId e < id' -> return ([], st)
+      | eId e == id'-> return  ([o], st)
+      | otherwise     -> applyEntry p  st e
+    Nothing           -> applyEntry p st e
 
 applyEntries :: forall term name   stateMachineData input output m p s
              .  (Monad m, (Reifies   s (StateMachine m input stateMachineData (output, stateMachineData))))
@@ -447,19 +427,12 @@ applyEntries :: forall term name   stateMachineData input output m p s
              -> [Entry input]
              -> m  ([RaftOutput output]
                 ,RaftData term name  LogIndex stateMachineData input output)
-applyEntries p h st entries =
-  case entries of
-    []     -> return  ([], st)
-    (e:es) -> do
-                (out, st') <-  catchApplyEntry p  st e
-                let out' = if eAt e == h
-                         then
-                           fmap (\o -> ClientResponse (eClient e) (eId e) o) out
-                         else
-                           []
-
-                (out'', state)<- applyEntries p h st' es
-                return  (out' ++ out'', state)
+applyEntries _p _h st [] = return  ([], st)
+applyEntries p h st (e:es) = do
+  (out, st') <-  catchApplyEntry p  st e
+  let out' = if eAt e == h then ClientResponse (eClient e) (eId e) <$> out else []
+  (out'', state) <- applyEntries p h st' es
+  return (out' ++ out'', state)
 
 doGenericServer :: forall term name stateMachineData input output p s m
                 . (Monad m, (Reifies   s (StateMachine m input stateMachineData (output, stateMachineData))))
@@ -499,7 +472,7 @@ haveQuorum :: forall term  stateMachineData input  output
            -> Bool
 haveQuorum state  _me n   =
    div2 (fromIntegral $ length nodes)
-        < (fromIntegral $ length $ filter (\h -> n <= assocDefault (matchIndex state) h 0 ) nodes)
+        < (fromIntegral . length $ filter (\h -> n <= assocDefault (matchIndex state) h 0 ) nodes)
 
 advanceCommitIndex :: forall stateMachineData input  output
                    .  RaftData Term Name  LogIndex stateMachineData input output
@@ -509,7 +482,7 @@ advanceCommitIndex state me =
    let entriesToCommit = filter
              (\ e -> (currentTerm state == eTerm e)
                      && (commitIndex state < eIndex e)
-                     && (haveQuorum state me (eIndex e)))
+                     && haveQuorum state me (eIndex e))
              (findGtIndex (log state) (commitIndex state))
      in
         state{commitIndex=(\a c b -> foldl' a b c) max (map eIndex entriesToCommit) (commitIndex state)}
@@ -533,7 +506,7 @@ doLeader state me =
                 let
                   replicaMessages = map (replicaMessage state'' me)
                                         (filter
-                                         (\ h -> if me == h then False else True) nodes)
+                                         (\ h -> me /= h) nodes)
                 in
                    ([], state'', replicaMessages)
           else
@@ -575,7 +548,7 @@ handleClientRequest :: forall stateMachineData input  output
 handleClientRequest me state client id' c =
   case rdType state of
     Leader -> let
-                index = 1 + (maxIndex (log state))
+                index = 1 + maxIndex (log state)
               in
                 ([]
                 ,state{log = Entry me client id' index (currentTerm state) c : log state
@@ -625,7 +598,7 @@ raftInputHandler p me inp state =
       do (genericOut, state'', genericPkts) <-  doGenericServer p  me state'
          let
             (leaderOut, state''', leaderPkts) = doLeader state'' me
-         return $
+         return
               (handlerOut ++ genericOut ++ leaderOut
               ,state'''
               ,pkts ++ genericPkts ++ leaderPkts)
