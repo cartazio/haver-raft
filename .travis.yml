@@ -3,6 +3,8 @@
 # explicitly request legacy non-sudo based build environment
 sudo: required
 
+notifications:
+  email: false
 # The following enables several GHC versions to be tested; often it's enough to test only against the last release in a major GHC version. Feel free to omit lines listings versions you don't need/want testing for.
 env:
 
