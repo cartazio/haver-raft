@@ -60,7 +60,8 @@ source-repository head
 
 library
   -- Modules exported by the library.
-  exposed-modules:     Network.Consensus.Verified.Raft
+  exposed-modules:    Network.Consensus.Verified.Raft
+                      Network.Message.Framing
 
   -- Modules included in this library but not exported.
   -- other-modules:
@@ -73,6 +74,7 @@ library
                       , bytes >= 0.15 && < 0.16
                       , profunctors >= 5.1 && < 5.2
                       ,reflection >= 2 && < 2.1
+                      ,bytestring
 
   -- Directories containing source files.
   hs-source-dirs:      src
