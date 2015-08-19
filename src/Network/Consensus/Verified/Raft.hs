@@ -5,7 +5,7 @@
 {-# LANGUAGE ScopedTypeVariables        #-}
 --{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-#  LANGUAGE RankNTypes #-}
+
 
 module Network.Consensus.Verified.Raft where
 
@@ -17,7 +17,7 @@ import Data.Foldable (foldl')
 import Data.Maybe (isJust)
 import Data.Bytes.Serial
 --import qualified Data.Map as Map
-import Data.Map (Map)
+--import Data.Map (Map)
 import Data.Profunctor
 import qualified Control.Category as CC
 import Data.Reflection
@@ -56,39 +56,8 @@ instance (Serial term , Serial name,Serial logIndex,Serial stateMachine
           , Serial input,Serial output)
     => Serial (RaftData term name logIndex stateMachine input output)
 
-newtype  Res output state name msg = Res ([output],state,[(name,msg)])
-
-data Arrangement m name state input output message request_id =
-  Arrangement {
-        arrInit :: name -> state
-        ,arrReboot :: state -> state
-        ,arrHandleIO :: name -> input -> state -> Res output state name message
-        ,arrHandleNet :: name -> name -> message -> state -> Res output state name message
-        ,arrSetTimeout :: name -> state ->  Res output state name message
-        ,arrDeserialize ::  String -> Maybe (request_id,input)
-        ,arrSerialize :: output -> (request_id,String)
-        ,arrDebug :: Bool
-        ,arrDebugRecv :: state -> (name , message) -> m ()
-        ,arrDebugSend :: state -> (name, message) -> m ()
-        ,arrDebugTimeout :: state -> m ()
-
-  }
-
-data Env m ref state out_channel file_descr request_id sockaddr name = Env {
-    refRead :: forall a . ref a -> m a
-    ,refWrite :: forall a .  a -> ref a -> m ()
-    ,refInit :: forall a . a -> m (ref a)
-    ,restored_state :: state
-    ,clog :: out_channel
-    ,usock :: file_descr
-    ,isock :: file_descr
-    ,csocks :: ref [file_descr]
-    ,outstanding :: ref (Map request_id file_descr)
-    ,saves :: ref Int
-    ,nodes :: [(name,sockaddr)]
-  }
-
-data LogStep
+newtype  Res output state name msg = Res {unRes :: ([output],state,[(name,msg)])}
+  deriving (Eq,Ord,Show)
 
 -- | StateMachine is  ... a state machine
 -- in this code base it'd used as @StateMachine state input (output,state)@
@@ -589,9 +558,11 @@ raftNetHandler :: forall stateMachineData input output m p s k
                -> Name
                -> Msg input
                -> RaftData Term Name  LogIndex stateMachineData input output
-               -> m  ([RaftOutput output]
-                  ,RaftData Term Name  LogIndex stateMachineData input output
-                  ,[(Name, Msg input)])
+               -> m  (Res
+                           (RaftOutput output)
+                           (RaftData Term Name LogIndex stateMachineData input output)
+                           Name
+                           (Msg input))
 raftNetHandler ps pk   me src m state =
   let
     (state', pkts) = handleMessage src me m state
@@ -600,7 +571,7 @@ raftNetHandler ps pk   me src m state =
       (genericeOut, state'', genericPkts) <-  doGenericServer ps  me state'
       let
         (leaderOut, state''', leaderPkts) = doLeader pk  state'' me
-      return  (genericeOut ++ leaderOut
+      return $ Res (genericeOut ++ leaderOut
               ,state'''
               ,pkts ++ genericPkts ++ leaderPkts)
 
@@ -610,11 +581,13 @@ handleClientRequest :: forall stateMachineData input  output
                     -> ECLIENT
                     -> EID
                     -> input
-                    -> ([RaftOutput output]
-                        ,RaftData Term Name  LogIndex  stateMachineData input output
-                        ,[(Name, Msg input)])
+                    -> Res
+                         (RaftOutput output)
+                         (RaftData Term Name LogIndex stateMachineData input output)
+                         Name
+                         (Msg input)
 handleClientRequest me state client id' c =
-  case rdType state of
+  Res $ case rdType state of
     Leader -> let
                 index = 1 + maxIndex (log state)
               in
@@ -626,16 +599,18 @@ handleClientRequest me state client id' c =
     Follower -> ([NotLeader client id'], state, [])
     Candidate -> ([NotLeader client id'], state, [])
 
-handleTimeout :: forall logIndex stateMachineData output input  p k
+handleTimeout :: forall  stateMachineData output input  p k
               . Reifies k (Set Name)
               => p k
               -> Name
-              -> RaftData Term Name  logIndex stateMachineData input output
-              -> ([RaftOutput output]
-                 ,RaftData Term Name  logIndex stateMachineData input output
-                 ,[(Name, Msg input)])
+              -> RaftData Term Name  LogIndex stateMachineData input output
+              -> Res
+                     (RaftOutput output)
+                     (RaftData Term Name LogIndex stateMachineData input output)
+                     Name
+                     (Msg input)
 handleTimeout  pk me state =
-  case rdType state of
+  Res $ case rdType state of
     Leader -> ([], state{shouldSend=True}, []) -- We auto-heartbeat elsewhere
     Candidate -> tryToBecomeLeader pk  me state
     Follower -> tryToBecomeLeader pk  me state
@@ -646,11 +621,13 @@ handleInput :: forall stateMachineData output input p k
             ->  Name
             -> RaftInput input
             -> RaftData Term Name LogIndex stateMachineData input output
-            -> ([RaftOutput output]
-               ,RaftData Term Name LogIndex  stateMachineData input output
-               ,[(Name, Msg input)])
+            -> Res
+                     (RaftOutput output)
+                     (RaftData Term Name LogIndex stateMachineData input output)
+                     Name
+                     (Msg input)
 handleInput pk me inp state =
-  case inp of
+    case inp of
     ClientRequest client id' c -> handleClientRequest me state client id' c
     Timeout -> handleTimeout pk  me state
 
@@ -663,17 +640,20 @@ raftInputHandler :: forall stateMachineData input output p s k m
                  -> Name
                  -> RaftInput input
                  -> RaftData Term Name  LogIndex  stateMachineData input output
-                 -> m ([RaftOutput output]
-                    ,RaftData Term Name LogIndex  stateMachineData input output
-                    ,[(Name, Msg input)])
+                 -> m (Res
+                           (RaftOutput output)
+                           (RaftData Term Name LogIndex stateMachineData input output)
+                           Name
+                           (Msg input)
+                           )
 raftInputHandler p pk  me inp state =
     let
-      (handlerOut, state', pkts) = handleInput pk  me inp state
+      (handlerOut, state', pkts) = unRes $ handleInput pk  me inp state
     in
       do (genericOut, state'', genericPkts) <-  doGenericServer p  me state'
          let
             (leaderOut, state''', leaderPkts) = doLeader pk state'' me
-         return
+         return $ Res
               (handlerOut ++ genericOut ++ leaderOut
               ,state'''
               ,pkts ++ genericPkts ++ leaderPkts)
