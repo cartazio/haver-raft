@@ -38,7 +38,7 @@ getSimpleMsg = go []
                               case (fromIntegral bytesLeft :: Int) of
                                   0 -> return $ Right $ reverse revList
                                   n | n >  8 ->
-                                       do next <-  (fmap Right headeredBS ) <|> (fmap Left ( ensure n   ))
+                                       do next <-  fmap Right headeredBS  <|> fmap Left ( ensure n)
                                           case next of
                                             Right newMsg -> go ( Message newMsg : revList)
                                             Left resid -> return $ Left (reverse revList, Residue $ DBB.byteString resid)

@@ -62,17 +62,7 @@ defaultArrangement ps pk  = Arrangement {
     ,debugTimeout = undefined
   }
 
-  {-
- Couldn't match type ‘([RaftOutput output],
-                          RaftData Term Name LogIndex stateMachineData input output,
-                          [(Name, Msg input)])’
-                   with ‘Res
-                           output
-                           (RaftData Term Name LogIndex stateMachineData input output)
-                           Name
-                           message’
 
-  -}
 
 
 data Env m  state out_channel file_descr request_id sockaddr name = Env {
