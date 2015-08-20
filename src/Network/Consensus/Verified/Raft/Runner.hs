@@ -73,7 +73,7 @@ defaultArrangement ps pk  = Arrangement {
 data Env m  state out_channel file_descr request_id sockaddr name = Env {
     restored_state :: state
     ,snapfile:: String
-    ,clog :: out_channel
+    ,clog :: out_channel -- this may be spurious type wise
     ,usock :: file_descr
     ,isock :: file_descr
     ,csocksRead :: m [file_descr] -- think IORef [...]
@@ -124,11 +124,10 @@ get_initial_state :: forall
             msg
             input
             output
-            message
             request_id .
      Alternative f =>
      EnvOps f out_channel state file_descr sockaddr name msg input
-     -> Arrangement f name state input output message request_id
+     -> Arrangement f name state input output msg request_id
      -> String
      -> name
      -> f state
