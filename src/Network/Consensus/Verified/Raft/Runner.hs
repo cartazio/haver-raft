@@ -57,7 +57,7 @@ defaultArrangement ps pk  = Arrangement {
     ,reboot = Raft.reboot
     ,handleIO = Raft.raftInputHandler ps pk
     ,handleNet = Raft.raftNetHandler ps pk
-    ,handleTimeout = (\nm st -> return $ Raft.handleTimeout pk nm st)
+    ,handleTimeout = \nm st -> return $ Raft.handleTimeout pk nm st
     ,setTimeout = Raft.handleTimeout pk
     ,deserialize = error "undefined deserialize Arrangement"
     ,serialize = error "undefined serialize Arrangement"
@@ -102,22 +102,17 @@ data EnvOps m out_channel state file_descr sockaddr name msg input  = EnvOps {
   }
 
 update_state_from_log_entry ::
-  forall
-    b
-    f
-    output
-    name
-    msg
-    input
-    request_id.
-         Functor f
-         => Arrangement f name b input output msg request_id
-         -> name -> b -> LogStep name msg input -> f b
-update_state_from_log_entry env nm s op  =
+  forall  state f  output name  msg input request_id
+        . Functor f
+         => Arrangement f name state input output msg request_id
+         -> name
+         -> state
+         -> LogStep name msg input -> f state
+update_state_from_log_entry arr nm s op  =
     ((\(_,st,_)-> st) . unRes) <$> case op of
-        LogInput inp  ->  (handleIO env) nm inp s
-        LogNet src m -> (handleNet env) nm src m s
-        LogTimeout -> (handleTimeout env) nm s
+        LogInput inp  ->  handleIO arr nm inp s
+        LogNet src m -> handleNet arr nm src m s
+        LogTimeout -> handleTimeout arr nm s
 
 get_initial_state :: forall
             f   -- (f :: * -> *)
@@ -141,7 +136,7 @@ get_initial_state :: forall
      -> name
      -> f state
 get_initial_state eop arr snpfile nm =
-    (loadSnapShot eop) snpfile <|>  (pure $ (init arr) nm )
+    loadSnapShot eop snpfile <|>  pure (init arr nm)
 
 
 
@@ -164,45 +159,44 @@ restore_from_log :: forall
     -> name
     -> state
     -> m state
-restore_from_log env eop fd nm st = go st
+restore_from_log arr eop fd nm st = go st
   where
-    yielder = (yieldLogEvents eop) fd
+    yielder = yieldLogEvents eop fd
     go theState = do
       nextOp <- yielder
       case nextOp of
           Nothing -> return theState
           Just op ->
            do st' <-
-                update_state_from_log_entry env nm st op
+                update_state_from_log_entry arr nm st op
               go st'
 
 restore :: forall  m -- (m :: * -> *)
-                        state
-                         -- (m1 :: * -> *)
-                        output
-                        message
-                        request_id
-                        out_channel
-                        file_descr
-                        sockaddr
-                        name
-                        msg
-                        input .
-                 (Monad m, Alternative m) =>
-                 Arrangement m name state input output message request_id
-                 -> Arrangement m name state input output msg request_id
-                 -> EnvOps m out_channel state file_descr sockaddr name msg input
-                 -> String
-                 -> String
-                 -> name
-                 -> m state
-restore arr env eop snpfile logfl nm =
+      state
+       -- (m1 :: * -> *)
+      output
+      request_id
+      out_channel
+      file_descr
+      sockaddr
+      name
+      msg
+      input .
+     (Monad m, Alternative m)
+   => Arrangement m name state input output msg request_id
+     -- -> Arrangement m name state input output msg request_id
+     -> EnvOps m out_channel state file_descr sockaddr name msg input
+     -> String
+     -> String
+     -> name
+     -> m state
+restore arr  eop snpfile logfl nm =
    do
     -- this doesn't deal with catching up with
     -- nonlocal update ... i think....
      istate <- get_initial_state eop arr snpfile nm
-     logfd <- (open eop) logfl
-     restore_from_log env eop logfd nm istate
+     logfd <- open eop logfl
+     restore_from_log arr eop logfd nm istate
 
 
 denote :: (Monad m,Ord name)
