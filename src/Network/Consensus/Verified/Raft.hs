@@ -7,7 +7,36 @@
 {-# LANGUAGE FlexibleContexts #-}
 
 
-module Network.Consensus.Verified.Raft where
+module Network.Consensus.Verified.Raft(
+  RaftData(..)
+  ,Res(..)
+  ,StateMachine(..)
+  ,Term(..)
+  ,OrphNatural(..)
+  ,LogIndex(..)
+  ,Name(..)
+  ,ECLIENT(..)
+  ,EID(..)
+  ,Entry
+  ,Msg(..)
+  ,RaftInput(..)
+  ,RaftOutput(..)
+  ,ServerType(..)
+  ,reboot
+  ,raftNetHandler
+  ,raftInputHandler
+  ,initState
+  ,initHandlers
+  ,handleMessage
+  ,handleTimeout
+  ,handleInput
+  ,handleAppendEntries
+  ,handleAppendEntriesReply
+  ,handleRequestVote
+  ,handleClientRequest
+  ,handleRequestVoteReply
+
+  ) where
 
 import Data.Data (Data, Typeable)
 import GHC.Generics (Generic)
@@ -587,7 +616,7 @@ raftNetHandler :: forall stateMachineData input output m p s k
                            (Msg input))
 raftNetHandler ps pk   me src m state =
   let
-    (state', pkts) = handleMessage src me m state
+    (state', pkts) = handleMessage pk src me m state
   in
     do
       (genericeOut, state'', genericPkts) <-  doGenericServer ps  me state'
