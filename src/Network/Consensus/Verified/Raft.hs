@@ -363,26 +363,48 @@ div2 n = 1 +  div2 (n-2)
 wonElection :: forall prox k t  a. (Reifies k (Set Name),Foldable t) => prox k -> t a -> Bool
 wonElection pk votes = 1 + div2 (fromIntegral $ Set.size $ reflect pk  ) <= fromIntegral (length votes)
 
-handleRequestVoteReply :: forall term name logIndex stateMachineData input output
-                       . Ord term
-                       => name
-                       -> RaftData term name logIndex  stateMachineData input output
+handleRequestVoteReply :: forall prox k term name  stateMachineData input output
+                       . (Ord term,Ord name,(Reifies k (Set Name)))
+                       => prox k
+                       -> name
+                       -> RaftData term name LogIndex  stateMachineData input output
                        -> name
                        -> term
                        -> Bool
-                       -> RaftData term name logIndex  stateMachineData input output
-handleRequestVoteReply _me state _src t _voted =
-    if t > currentTerm state then (advanceCurrentTerm state t){rdType = Follower}
-      else undefined
+                       -> RaftData term name LogIndex  stateMachineData input output
+handleRequestVoteReply pk  me state src t voteGranted
+    | t > currentTerm state =
+         (advanceCurrentTerm state t){rdType = Follower}
+    | t < currentTerm state = state
+    | otherwise =
+        let
+          won =  voteGranted
+            && wonElection  pk (Set.toList $ Set.fromList $ src : votesReceived state)
+        in
+          case rdType state of
+            Candidate -> state{votesReceived=
+                                  (if  voteGranted then [src] else [])
+                                    ++ votesReceived state -- this should use Set
+                              ,rdType = if won then Leader else rdType state
+                              ,matchIndex = assocSet [] me (maxIndex (log state))
+                              ,nextIndex= []
+                              ,electoralVictories = (if won then
+                                  [(currentTerm state, src : votesReceived state, log state)] else [])
+                                    ++ electoralVictories state
+                                     }
+            Follower -> state
+            Leader -> state
 
-handleMessage :: forall stateMachineData output input
-              .  Name
+handleMessage :: forall stateMachineData output input prox k
+              . (Reifies k (Set Name))
+              => prox k
+              ->Name
               -> Name
               -> Msg input
               -> RaftData Term Name  LogIndex  stateMachineData input output
               -> (RaftData Term Name LogIndex  stateMachineData input output
                  ,[(Name, Msg input)])
-handleMessage src me m state =
+handleMessage pk src me m state =
   case m of
     AppendEntries t lid prevLogIndex prevLogTerm entries leaderCommit ->
        let
@@ -397,7 +419,7 @@ handleMessage src me m state =
       in
         (st,[(src,r)])
     RequestVoteReply t voteGranted ->
-      (handleRequestVoteReply me state src t voteGranted,[])
+      (handleRequestVoteReply pk me state src t voteGranted,[])
 
 assoc :: forall  a b. Eq a => [(a, b)] -> a -> Maybe b
 assoc = flip lookup
