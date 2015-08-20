@@ -1,29 +1,50 @@
 {-#  LANGUAGE ScopedTypeVariables #-}
 
-module Network.Message.Framing where
+module Network.Message.Framing(getSimpleMsg
+    ,prependResidue
+    ,Message(..)
+    ,Residue(..)
+    ,prependAndGetMessage
+    ,putMsg
+    ,putMsgGen
+    ) where
 
-
+import Control.Monad (unless)
+import Data.Int
 import Data.Typeable
-import qualified Data.ByteString.Char8 as BSC
-import Data.ByteString.Char8 (ByteString)
+import qualified Data.ByteString.Lazy.Char8 as LBSC
+import Data.ByteString.Lazy.Char8 (ByteString)
 --import Data.Bytes.Serial as DBS
 import Data.Bytes.Put as DBP
 import Data.Bytes.Get as DBG
 --import Data.Word
 import Data.ByteString.Builder as DBB
 import Control.Applicative ((<|>),Alternative)
+import Data.Monoid ((<>))
 
-newtype Message = Message { payload :: BSC.ByteString } deriving (Eq, Show,Typeable)
+newtype Message = Message { payload :: LBSC.ByteString } deriving (Eq, Show,Typeable)
 
 -- | LeftOvers!
 newtype Residue =  Residue { prefix :: Builder} deriving (Typeable)
 
 
 
-putMsg :: MonadPut m => Message -> m ()
-putMsg msg = do putWord64be (fromIntegral $ BSC.length $ payload msg)
-                putByteString $ payload msg
+putMsgGen :: MonadPut m => Message -> m ()
+putMsgGen msg = do putWord64be (fromIntegral $ LBSC.length $ payload msg)
+                   DBP.putLazyByteString $ payload msg
 
+putMsg :: Message -> ByteString
+putMsg msg = runPutL $ putMsgGen msg
+
+prependAndGetMessage ::
+         Residue
+      -> ByteString
+      -> Either ([Message],Residue)  [Message]
+prependAndGetMessage res bs = runGetL getSimpleMsg $ prependResidue res bs
+
+
+prependResidue :: Residue -> ByteString -> ByteString
+prependResidue (Residue res) bs = DBB.toLazyByteString $ res <> DBB.lazyByteString bs
 
 {- | getSimpleMsg is a message framing parser that is designed to be well behaved
 when reading from a potentially unbounded byteStream!
@@ -35,7 +56,7 @@ getSimpleMsg = go []
         where
               go :: [Message]        ->  m (Either ([Message],Residue)  [Message] )
               go revList = do bytesLeft <- remaining
-                              case (fromIntegral bytesLeft :: Int) of
+                              case fromIntegral bytesLeft  of
                                   0 -> return $ Right $ reverse revList
                                   n | n >  8 ->
                                        do next <-  fmap Right headeredBS  <|> fmap Left ( ensure n)
@@ -45,10 +66,16 @@ getSimpleMsg = go []
                                       -- n <= 8 case, but in a way that
                                       -- placates the coverage checker
                                     | otherwise  ->
-                                        do resid<- ensure n
-                                           return $ Left (reverse revList, Residue $ DBB.byteString resid)
+                                        do resid<- ensureLazyBS $ fromIntegral n
+                                           return $ Left (reverse revList, Residue $ DBB.lazyByteString resid)
 
 
               headeredBS :: m ByteString
-              headeredBS  = do header <- getWord64be   ; ensure (fromIntegral header)
+              headeredBS  = do header <- getWord64be   ; ensureLazyBS (fromIntegral header)
+
+              ensureLazyBS :: Int64 -> m ByteString
+              ensureLazyBS bct = do   rest <- remaining ;
+                                      unless ( bct <= fromIntegral rest )
+                                        $ fail "ensureLazyBS required more bytes"
+                                      getLazyByteString bct
 

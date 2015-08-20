@@ -67,16 +67,18 @@ defaultArrangement ps pk  = Arrangement {
 
 data Env m  state out_channel file_descr request_id sockaddr name = Env {
     restored_state :: state
+    ,snapfile:: String
     ,clog :: out_channel
     ,usock :: file_descr
     ,isock :: file_descr
-    ,csocksRead :: m [file_descr]
+    ,csocksRead :: m [file_descr] -- think IORef [...]
     ,csocksUpdate :: [file_descr] -> m ()
-    ,outstandingRead :: m (Map request_id file_descr)
+    ,outstandingRead :: m (Map request_id file_descr) -- think IORef (Map ...)
     ,outstandingUpdate ::  Map request_id file_descr -> m ()
-    ,savesRead :: m Int
+    ,savesRead :: m Int -- think IORef Int
     ,savesWrite :: Int -> m ()
-    ,nodes :: [(name,sockaddr)]
+    ,nodes :: m [(name,sockaddr)] -- m [...] to model membership list may change.
+                                  -- though verdi proof assumes fixed
   }
 
 
