@@ -123,15 +123,12 @@ get_initial_state :: forall
             name
             msg
             input
-            m
-            --(m :: * -> *)
-
             output
             message
             request_id .
      Alternative f =>
      EnvOps f out_channel state file_descr sockaddr name msg input
-     -> Arrangement m name state input output message request_id
+     -> Arrangement f name state input output message request_id
      -> String
      -> name
      -> f state
