@@ -288,10 +288,12 @@ handleAppendEntries _me state t mleaderId prevLogIndex prevLogTerm entries leade
              ,rdType      = Follower
              ,leaderId    = Just mleaderId }
         ,AppendEntriesReply t entries True)
-    | otherwise = case findAtIndex (log state) prevLogIndex of
-      Nothing -> (state, AppendEntriesReply (currentTerm state) entries False)
-      Just e | prevLogTerm /= eTerm e ->(state, AppendEntriesReply (currentTerm state) entries False)
-             |  haveNewEntries  state entries ->  let
+    | otherwise =
+      case findAtIndex (log state) prevLogIndex of
+        Nothing -> (state, AppendEntriesReply (currentTerm state) entries False)
+        Just e | prevLogTerm /= eTerm e ->
+                   (state, AppendEntriesReply (currentTerm state) entries False)
+               |  haveNewEntries  state entries ->  let
                 log' = removeAfterIndex (log state) prevLogIndex
                 log'' = entries ++ log'
                  in
@@ -301,11 +303,11 @@ handleAppendEntries _me state t mleaderId prevLogIndex prevLogTerm entries leade
                         ,rdType      = Follower
                         ,leaderId    = Just mleaderId}
                   ,AppendEntriesReply t entries True)
-            | otherwise ->
-               ((advanceCurrentTerm state t) {
-                         rdType   = Follower
-                        ,leaderId = Just mleaderId}
-                 ,AppendEntriesReply t entries True)
+               | otherwise ->
+                 ((advanceCurrentTerm state t) {
+                           rdType   = Follower
+                          ,leaderId = Just mleaderId}
+                   ,AppendEntriesReply t entries True)
 
 listupsert :: Eq k => [(k,v)] -> k -> v -> [(k,v)]
 listupsert [] k v = [(k,v)]
