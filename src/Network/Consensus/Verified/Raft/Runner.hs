@@ -19,6 +19,46 @@ import Data.Set (Set)
 import Data.Reflection
 import qualified Data.Map as Map
 import Control.Applicative(Alternative,(<|>))
+import Data.ByteString.Lazy.Char8 (ByteString)
+--import Data.Maybe (fromMaybe)
+
+
+data InputKV k v = PutKV k v
+                  | GetKV k
+                  | DelKV k
+                  | CASKV k (Maybe v) v
+                  | CADKV k v
+              deriving (Eq,Ord,Show)
+
+data OutputKV k v = ResponseKV k (Maybe v) (Maybe v)
+              deriving (Eq,Ord,Show)
+
+kvHandler ::  forall m k v kv . (Eq v, Monad m) =>  (kv -> k -> m (Maybe v))
+      -> (kv -> k -> v -> m kv )
+      -> (kv -> k -> m kv)
+      ->  StateMachine m (InputKV k v) kv (OutputKV k v,kv)
+kvHandler get put del =
+  StateMachine $ \ kv cmd ->
+    case cmd of
+      PutKV k v -> do oldV :: (Maybe v) <- get kv k  ;
+                      newkv <- put kv k v ;
+                      return (ResponseKV k (Just v) oldV,newkv)
+      GetKV k -> do   v <- get kv k ; return (ResponseKV k v v, kv)
+      DelKV k -> do   old <- get kv k ; newKV<- del kv  k  ; return (ResponseKV k Nothing old, newKV)
+      CASKV k v v' -> do old  <- get kv k ;
+                         if old == v
+                            then  do  newKV <- put kv k v' ; return (ResponseKV k (Just v') old , newKV)
+                            else return (ResponseKV k old old ,kv)
+      CADKV k v -> do   old <- get kv k  ;
+                        if old == Just v
+                          then do newKV  <- del kv k ; return (ResponseKV k Nothing old,newKV)
+                          else return (ResponseKV k old old,kv)
+
+
+
+
+
+
 
 data Arrangement m name state input output message request_id =
   Arrangement {
@@ -30,9 +70,9 @@ data Arrangement m name state input output message request_id =
         ,handleIO :: name -> input -> state ->  m (Res output state name message)
         ,handleNet :: name -> name -> message -> state -> m (Res output state name message)
         ,handleTimeout :: name -> state -> m (Res output state name message)
-        ,setTimeout :: name -> state ->  Res output state name message
-        ,deserialize ::  String -> Maybe (request_id,input)
-        ,serialize :: output -> (request_id,String)
+        ,setTimeout :: name -> state -> m Double
+        ,deserialize ::  ByteString -> Maybe (request_id,input)
+        ,serialize :: output -> (request_id,ByteString)
         ,debug :: Bool
         ,debugRecv :: state -> (name , message) -> m ()
         ,debugSend :: state -> (name, message) -> m ()
@@ -58,7 +98,7 @@ defaultArrangement ps pk  = Arrangement {
     ,handleIO = Raft.raftInputHandler ps pk
     ,handleNet = Raft.raftNetHandler ps pk
     ,handleTimeout = \nm st -> return $ Raft.handleTimeout pk nm st
-    ,setTimeout = Raft.handleTimeout pk
+    ,setTimeout =  error "setTimeout is an RNG that depends on leadershipness"
     ,deserialize = error "undefined deserialize Arrangement"
     ,serialize = error "undefined serialize Arrangement"
     ,debug = False
@@ -74,12 +114,12 @@ data Env m  state out_channel file_descr request_id sockaddr name = Env {
     restored_state :: state
     ,snapfile:: String
     ,clog :: out_channel -- this may be spurious type wise
-    ,usock :: file_descr
-    ,isock :: file_descr
-    ,csocksRead :: m [file_descr] -- think IORef [...]
-    ,csocksUpdate :: [file_descr] -> m ()
-    ,outstandingRead :: m (Map request_id file_descr) -- think IORef (Map ...)
-    ,outstandingUpdate ::  Map request_id file_descr -> m ()
+    ,txSocket :: file_descr
+    ,rxSocket :: file_descr
+    --,csocksRead :: m [file_descr] -- think IORef [...]
+    --,csocksUpdate :: [file_descr] -> m ()
+    --,outstandingRead :: m (Map request_id file_descr) -- think IORef (Map ...)
+    --,outstandingUpdate ::  Map request_id file_descr -> m ()
     ,savesRead :: m Int -- think IORef Int
     ,savesWrite :: Int -> m ()
     ,nodes :: m (Map name sockaddr) -- m [...] to model membership list may change.
@@ -92,13 +132,16 @@ data LogStep name msg input = LogInput input | LogNet name msg  | LogTimeout
   deriving (Eq,Ord,Show)
 
 
-data EnvOps m out_channel state file_descr sockaddr name msg input  = EnvOps {
+data EnvOps m out_channel state file_descr sockaddr name msg  request_id input  = EnvOps {
     -- yieldLogEvents assumes the only newlines are betwee
     -- log events
     -- yields nothing when reaches end of file
     open :: String -> m file_descr
     ,yieldLogEvents ::  file_descr -> m (Maybe (LogStep name msg input))
     ,loadSnapShot :: String -> m state
+    ,send :: Env m  state out_channel file_descr request_id sockaddr name
+          -> name -> msg -> m ()
+--  ,receive ::
   }
 
 update_state_from_log_entry ::
@@ -126,7 +169,7 @@ get_initial_state :: forall
             output
             request_id .
      Alternative f =>
-     EnvOps f out_channel state file_descr sockaddr name msg input
+     EnvOps f out_channel state file_descr sockaddr name msg  request_id input
      -> Arrangement f name state input output msg request_id
      -> String
      -> name
@@ -150,7 +193,7 @@ restore_from_log :: forall
            request_id.
     Monad m =>
     Arrangement m name state input output msg request_id
-    -> EnvOps m out_channel state file_descr sockaddr name msg input
+    -> EnvOps m out_channel state file_descr sockaddr name msg request_id input
     -> file_descr
     -> name
     -> state
@@ -181,7 +224,7 @@ restore :: forall  m -- (m :: * -> *)
      (Monad m, Alternative m)
    => Arrangement m name state input output msg request_id
      -- -> Arrangement m name state input output msg request_id
-     -> EnvOps m out_channel state file_descr sockaddr name msg input
+     -> EnvOps m out_channel state file_descr sockaddr name msg request_id input
      -> String
      -> String
      -> name
@@ -193,6 +236,8 @@ restore arr  eop snpfile logfl nm =
      istate <- get_initial_state eop arr snpfile nm
      logfd <- open eop logfl
      restore_from_log arr eop logfd nm istate
+
+
 
 
 denote :: (Monad m,Ord name)
