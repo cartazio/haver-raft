@@ -15,8 +15,8 @@ module Network.Consensus.Verified.Raft(
   ,OrphNatural(..)
   ,LogIndex(..)
   ,Name(..)
-  ,ECLIENT(..)
-  ,EID(..)
+  ,EClientId(..)
+  ,ESeqNum(..)
   ,Entry
   ,Msg(..)
   ,RaftInput(..)
@@ -76,7 +76,7 @@ data RaftData term name  logIndex stateMachineData input output =
     -- whoami
       ,rdType             :: ServerType
     -- client request state
-      ,clientCache        :: [(ECLIENT,(EID,output))]
+      ,clientCache        :: [(EClientId,(ESeqNum,output))]
     -- ghost variables ---- but do we care?
       ,electoralVictories :: [(term,[name],[Entry input])]
   } deriving (Read,Show,Typeable,Data,Generic)
@@ -145,17 +145,17 @@ initState :: forall stateMachineData . stateMachineData
 initState = undefined
 
 --- VerdiRaft doesn't distinquish these but all NATS are not the same!
-newtype ECLIENT = ECLIENT { unECLIENT :: OrphNatural }
+newtype EClientId = EClientId { unEClientId :: OrphNatural }
     deriving (Read, Eq, Show, Ord, Num, Data, Typeable, Generic)
-instance Serial ECLIENT
-newtype EID = EID { unEID :: OrphNatural }
+instance Serial EClientId
+newtype ESeqNum = ESeqNum { unESeqNum :: OrphNatural }
     deriving (Read, Eq, Show, Ord, Num, Data, Typeable, Generic)
-instance Serial EID
+instance Serial ESeqNum
 
 data Entry input = Entry {
    eAt     :: Name
-  ,eClient :: ECLIENT -- should this be Name?
-  ,eId     :: EID
+  ,eClient :: EClientId -- should this be Name?
+  ,eId     :: ESeqNum
   ,eIndex  :: LogIndex
   ,eTerm   :: Term
   ,eInput  :: input
@@ -170,14 +170,14 @@ data Msg input= RequestVote Term Name LogIndex Term
 instance Serial input => Serial (Msg input)
 
 data RaftInput input = Timeout
-               | ClientRequest ECLIENT EID input
+               | ClientRequest EClientId ESeqNum input
                deriving (Eq,Read,Ord,Show,Generic,Data )
 instance Serial input => Serial (RaftInput input)
 
 
 
-data RaftOutput output = NotLeader ECLIENT EID
-                | ClientResponse ECLIENT EID output
+data RaftOutput output = NotLeader EClientId ESeqNum
+                | ClientResponse EClientId ESeqNum output
                 deriving (Eq,Ord,Read,Show,Generic,Data)
 instance Serial output => Serial (RaftOutput output)
 
@@ -457,8 +457,8 @@ assoc = flip lookup
 
 getLastId :: forall  term name   stateMachineData input output
           .  RaftData term name  LogIndex stateMachineData input  output
-          -> ECLIENT
-          -> Maybe (EID, output)
+          -> EClientId
+          -> Maybe (ESeqNum, output)
 getLastId state client = assoc (clientCache state) client
 
 handler :: forall s m input output state prox  .  (Reifies   s (StateMachine m input state (output, state))) =>  prox s -> input  ->  state -> m (output,state)
@@ -631,8 +631,8 @@ raftNetHandler ps pk   me src m state =
 handleClientRequest :: forall stateMachineData input  output
                     .  Name
                     -> RaftData Term Name  LogIndex  stateMachineData input output
-                    -> ECLIENT
-                    -> EID
+                    -> EClientId
+                    -> ESeqNum
                     -> input
                     -> Res
                          (RaftOutput output)
