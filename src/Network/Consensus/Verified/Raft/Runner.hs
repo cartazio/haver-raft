@@ -79,7 +79,7 @@ defaultArrangement :: (Monad m
                    -> Arrangement
                         m
                         Name
-                        (RaftData Term Name LogIndex stateMachineData input output)
+                        (RaftData stateMachineData input output)
                         (RaftInput input)
                         (RaftOutput output)
                         (Msg input)
