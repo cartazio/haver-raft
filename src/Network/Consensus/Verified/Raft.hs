@@ -83,7 +83,7 @@ data RaftData stateMachineData input output =
 instance (Serial stateMachine, Serial input, Serial output)
   => Serial (RaftData stateMachine input output)
 
-newtype Res output state name msg = Res {unRes :: ([output], state, [(name, msg)])}
+newtype Res output state msg = Res {unRes :: ([output], state, [(Name, msg)])}
   deriving (Eq,Ord,Show)
 
 -- | StateMachine is  ... a state machine
@@ -161,7 +161,7 @@ data RaftInput input = Timeout
                      deriving (Eq,Read,Ord,Show,Generic,Data)
 instance Serial input => Serial (RaftInput input)
 
-data RaftOutput output = NotLeader EClientId ESeqNum
+data RaftOutput output = NotLeader EClientId ESeqNum -- Current Leader Name too?
                        | ClientResponse EClientId ESeqNum output
                        deriving (Eq,Ord,Read,Show,Generic,Data)
 instance Serial output => Serial (RaftOutput output)
@@ -584,7 +584,6 @@ raftNetHandler :: forall stateMachineData input output m p s k
                -> m (Res
                      (RaftOutput output)
                      (RaftData stateMachineData input output)
-                     Name
                      (Msg input))
 raftNetHandler ps pk me src m state = do
   (state, pkts) <- return $ handleMessage pk src me m state
@@ -604,7 +603,6 @@ handleClientRequest :: forall stateMachineData input output m
                     -> m (Res
                           (RaftOutput output)
                           (RaftData stateMachineData input output)
-                          Name
                           (Msg input))
 handleClientRequest me state client id' c =
   return $ Res $ case rdType state of
@@ -627,7 +625,6 @@ handleTimeout :: forall stateMachineData output input p k m
               -> m (Res
                     (RaftOutput output)
                     (RaftData stateMachineData input output)
-                    Name
                     (Msg input))
 handleTimeout  pk me state =
   Res <$> case rdType state of
@@ -638,13 +635,12 @@ handleTimeout  pk me state =
 handleInput :: forall stateMachineData output input p k m
             . (Reifies k (Set Name), Monad m)
             => p k
-            ->  Name
+            -> Name
             -> RaftInput input
             -> RaftData stateMachineData input output
             -> m (Res
                   (RaftOutput output)
                   (RaftData stateMachineData input output)
-                  Name
                   (Msg input))
 handleInput pk me inp state =
   case inp of
@@ -663,7 +659,6 @@ raftInputHandler :: forall stateMachineData input output p s k m
                  -> m (Res
                        (RaftOutput output)
                        (RaftData stateMachineData input output)
-                       Name
                        (Msg input))
 raftInputHandler p pk  me inp state = do
   (handlerOut, state, pkts) <- unRes <$> handleInput pk  me inp state

@@ -61,14 +61,14 @@ data Arrangement m state input output message request_id = Arrangement {
 -- note : handleIO and handleNet
 -- both asssume state machines do stateful update
 -- afaik, wrt extraction
-  ,handleIO :: Name -> input -> state ->  m (Res output state Name message)
-  ,handleNet :: Name -> Name -> message -> state -> m (Res output state Name message)
-  ,handleTimeout :: Name -> state -> m (Res output state Name message)
+  ,handleIO :: Name -> input -> state ->  m (Res output state message)
+  ,handleNet :: Name -> Name -> message -> state -> m (Res output state message)
+  ,handleTimeout :: Name -> state -> m (Res output state message)
   ,setTimeout :: Name -> state -> m Double
-  ,deserialize ::  ByteString -> Maybe (request_id,input)
-  ,serialize :: output -> (request_id,ByteString)
+  ,deserialize ::  ByteString -> Maybe (request_id, input)
+  ,serialize :: output -> (request_id, ByteString)
   ,debug :: Bool
-  ,debugRecv :: state -> (Name , message) -> m ()
+  ,debugRecv :: state -> (Name, message) -> m ()
   ,debugSend :: state -> (Name, message) -> m ()
   ,debugTimeout :: state -> m ()
   }
