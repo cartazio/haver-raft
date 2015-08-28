@@ -41,7 +41,7 @@ import GHC.Generics (Generic)
 import Numeric.Natural
 import Prelude hiding (log,sin, pred,map)
 import Data.Foldable (foldl')
-import Data.Maybe (isJust)
+import Data.Maybe (isNothing)
 import Data.Bytes.Serial
 import Data.Profunctor
 import qualified Control.Category as CC
@@ -362,7 +362,7 @@ handleRequestVote _me state t candidateId lastLogIndex lastLogTerm =
      let
        state' = advanceCurrentTerm state t
      in
-       if isJust (leaderId state')
+       if isNothing (leaderId state')
           && moreUpToDate lastLogTerm lastLogIndex (maxTerm (log state')) (maxIndex (log state'))
        then
          case votedFor state' of
