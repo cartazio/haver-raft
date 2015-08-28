@@ -16,12 +16,13 @@ import Network.Consensus.Verified.Raft (
   Res(..)
   ,StateMachine(..)
   ,Name(..)
-  ,Term(..)
-  ,LogIndex(..)
+--  ,Term(..)
+--  ,LogIndex(..)
   ,RaftOutput(..)
   ,RaftInput(..)
   ,Msg(..)
-  ,RaftData(..))
+  ,RaftData(..)
+  ,Name(..))
 
 data InputKV k v = PutKV k v
                  | GetKV k
@@ -54,21 +55,21 @@ kvHandler get put del =
                         then do newKV <- del kv k ; return (ResponseKV k Nothing old, newKV)
                         else return (ResponseKV k old old,kv)
 
-data Arrangement m name state input output message request_id = Arrangement {
-  init :: name -> state
+data Arrangement m state input output message request_id = Arrangement {
+  init :: Name -> state
   ,reboot :: state -> state
 -- note : handleIO and handleNet
 -- both asssume state machines do stateful update
 -- afaik, wrt extraction
-  ,handleIO :: name -> input -> state ->  m (Res output state name message)
-  ,handleNet :: name -> name -> message -> state -> m (Res output state name message)
-  ,handleTimeout :: name -> state -> m (Res output state name message)
-  ,setTimeout :: name -> state -> m Double
+  ,handleIO :: Name -> input -> state ->  m (Res output state Name message)
+  ,handleNet :: Name -> Name -> message -> state -> m (Res output state Name message)
+  ,handleTimeout :: Name -> state -> m (Res output state Name message)
+  ,setTimeout :: Name -> state -> m Double
   ,deserialize ::  ByteString -> Maybe (request_id,input)
   ,serialize :: output -> (request_id,ByteString)
   ,debug :: Bool
-  ,debugRecv :: state -> (name , message) -> m ()
-  ,debugSend :: state -> (name, message) -> m ()
+  ,debugRecv :: state -> (Name , message) -> m ()
+  ,debugSend :: state -> (Name, message) -> m ()
   ,debugTimeout :: state -> m ()
   }
 
@@ -78,7 +79,6 @@ defaultArrangement :: (Monad m
                    => prox s -> prox k
                    -> Arrangement
                         m
-                        Name
                         (RaftData stateMachineData input output)
                         (RaftInput input)
                         (RaftOutput output)
@@ -96,9 +96,9 @@ defaultArrangement ps pk = Arrangement {
   ,debug = False
   ,debugRecv = error "undefined debugRecv"
   ,debugSend = error "undefined debugSend"
-  ,debugTimeout = error "undefined debugTimeout"}
+  ,debugTimeout = error "undefined debugTimeout" }
 
-data Env m state out_channel file_descr request_id sockaddr name = Env {
+data Env m state out_channel file_descr request_id sockaddr = Env {
   restored_state :: state
   ,snapfile:: String
   ,clog :: out_channel -- this may be spurious type wise
@@ -110,57 +110,54 @@ data Env m state out_channel file_descr request_id sockaddr name = Env {
 --,outstandingUpdate ::  Map request_id file_descr -> m ()
   ,savesRead :: m Int -- think IORef Int
   ,savesWrite :: Int -> m ()
-  ,nodes :: m (Map name sockaddr) -- m [...] to model membership list may change.
+  ,nodes :: m (Map Name sockaddr) -- m [...] to model membership list may change.
                                   -- though verdi proof assumes fixed
   }
 
-data LogStep name msg input = LogInput input
-                            | LogNet name msg
-                            | LogTimeout
-  deriving (Eq,Ord,Show)
+data LogStep msg input = LogInput input
+                       | LogNet Name msg
+                       | LogTimeout
+                       deriving (Eq,Ord,Show)
 
-data EnvOps m out_channel state file_descr sockaddr name msg request_id input = EnvOps {
+data EnvOps m out_channel state file_descr sockaddr msg request_id input = EnvOps {
 -- yieldLogEvents assumes the only newlines are betwee
 -- log events
 -- yields nothing when reaches end of file
  open :: String -> m file_descr
- ,yieldLogEvents :: file_descr -> m (Maybe (LogStep name msg input))
+ ,yieldLogEvents :: file_descr -> m (Maybe (LogStep msg input))
  ,loadSnapShot :: String -> m state
- ,send :: Env m state out_channel file_descr request_id sockaddr name
-       -> name -> msg -> m ()
+ ,send :: Env m state out_channel file_descr request_id sockaddr -> Name -> msg -> m ()
 --  ,receive ::
   }
 
-update_state_from_log_entry :: forall state f output name msg input request_id
+update_state_from_log_entry :: forall state f output msg input request_id
                              . Functor f
-                             => Arrangement f name state input output msg request_id
-                            -> name
+                            => Arrangement f state input output msg request_id
+                            -> Name
                             -> state
-                            -> LogStep name msg input -> f state
+                            -> LogStep msg input -> f state
 update_state_from_log_entry arr nm s op =
     ((\(_,st,_)-> st) . unRes) <$> case op of
                                      LogInput inp -> handleIO arr nm inp s
                                      LogNet src m -> handleNet arr nm src m s
                                      LogTimeout -> handleTimeout arr nm s
 
--- (f :: * -> *)
-get_initial_state :: forall f out_channel file_descr sockaddr state name msg input output request_id
+get_initial_state :: forall f out_channel file_descr sockaddr state msg input output request_id
                    . Alternative f
-                  => EnvOps f out_channel state file_descr sockaddr name msg request_id input
-                  -> Arrangement f name state input output msg request_id
+                  => EnvOps f out_channel state file_descr sockaddr msg request_id input
+                  -> Arrangement f state input output msg request_id
                   -> String
-                  -> name
+                  -> Name
                   -> f state
 get_initial_state eop arr snpfile nm =
   loadSnapShot eop snpfile <|> pure (init arr nm)
 
--- (m :: * -> *)
-restore_from_log :: forall m out_channel state file_descr sockaddr name msg input output request_id
+restore_from_log :: forall m out_channel state file_descr sockaddr msg input output request_id
                   . Monad m
-                 => Arrangement m name state input output msg request_id
-                 -> EnvOps m out_channel state file_descr sockaddr name msg request_id input
+                 => Arrangement m state input output msg request_id
+                 -> EnvOps m out_channel state file_descr sockaddr msg request_id input
                  -> file_descr
-                 -> name
+                 -> Name
                  -> state
                  -> m state
 restore_from_log arr eop fd nm st = go st
@@ -175,26 +172,15 @@ restore_from_log arr eop fd nm st = go st
                 update_state_from_log_entry arr nm st op
               go st'
 
-restore :: forall  m -- (m :: * -> *)
-      state
-       -- (m1 :: * -> *)
-      output
-      request_id
-      out_channel
-      file_descr
-      sockaddr
-      name
-      msg
-      input .
-     (Monad m, Alternative m)
-   => Arrangement m name state input output msg request_id
-     -- -> Arrangement m name state input output msg request_id
-     -> EnvOps m out_channel state file_descr sockaddr name msg request_id input
-     -> String
-     -> String
-     -> name
-     -> m state
-restore arr  eop snpfile logfl nm =
+restore :: forall m state output request_id out_channel file_descr sockaddr msg input
+        . (Monad m, Alternative m)
+        => Arrangement m state input output msg request_id
+        -> EnvOps m out_channel state file_descr sockaddr msg request_id input
+        -> String
+        -> String
+        -> Name
+        -> m state
+restore arr eop snpfile logfl nm =
    do
     -- this doesn't deal with catching up with
     -- nonlocal update ... i think....
@@ -205,9 +191,10 @@ restore arr  eop snpfile logfl nm =
 
 
 
-denote :: (Monad m,Ord name)
-   => Env m  state out_channel file_descr request_id sockaddr name
-   -> name -> m sockaddr
+denote :: Monad m
+       => Env m state out_channel file_descr request_id sockaddr
+       -> Name
+       -> m sockaddr
 denote env nm =
   do  nds <- nodes env
       maybe

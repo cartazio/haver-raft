@@ -113,6 +113,7 @@ instance Serial Term
 -- which should be easy to fix
 newtype OrphNatural = OrphNatural { unOrphNatural :: Natural }
   deriving (Eq,Show,Ord,Enum,Num,Integral,Generic,Data,Real,Read)
+
 instance Serial OrphNatural where
   serialize (OrphNatural n) = serialize $ show n
   deserialize = fmap read deserialize
@@ -121,27 +122,22 @@ newtype LogIndex = LogIndex { unLogIndex :: OrphNatural }
   deriving (Read,Eq,Show,Ord,Num,Data,Typeable,Generic)
 instance Serial LogIndex
 
-newtype Name = Name { unName :: BSC.ByteString }
-  deriving (Read,Eq,Show,Ord,Data,Typeable,Generic)
-instance Serial Name
---data Input = Input deriving (Eq,Ord,Show)
---data Output = Output deriving (Eq,Ord,Show)
-
---- the verdi raft doesn't deal with changing membership
---nodes ::  [Name]
---nodes = undefined
-
---- the verdi raft doesn't deal with this, which we'll need to wrap in MonadIO or whatever
-initState :: forall stateMachineData . stateMachineData
-initState = undefined
-
---- VerdiRaft doesn't distinquish these but all NATS are not the same!
-newtype EClientId = EClientId { unEClientId :: OrphNatural }
-  deriving (Read, Eq, Show, Ord, Num, Data, Typeable, Generic)
-instance Serial EClientId
 newtype ESeqNum = ESeqNum { unESeqNum :: OrphNatural }
   deriving (Read, Eq, Show, Ord, Num, Data, Typeable, Generic)
 instance Serial ESeqNum
+
+newtype Name = Name { unName :: BSC.ByteString }
+  deriving (Read,Eq,Show,Ord,Data,Typeable,Generic)
+instance Serial Name
+
+--- VerdiRaft doesn't distinquish these but all NATS are not the same!
+newtype EClientId = EClientId { unEClientId :: Name }
+  deriving (Read, Eq, Show, Ord, Data, Typeable, Generic)
+instance Serial EClientId
+
+--- the verdi raft doesn't deal with this, which we'll need to wrap in MonadIO or whatever
+initState :: forall stateMachineData . stateMachineData
+initState = error "This is an bad state machine init"
 
 data Entry input = Entry {
    eAt     :: Name
