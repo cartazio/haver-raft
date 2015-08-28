@@ -455,9 +455,9 @@ applyEntry p st e = do
              ,stateMachine = d})
 
 
-catchApplyEntry :: forall stateMachineData input output m p s
+catchApplyEntry :: forall stateMachineData input output m proxy s
                 .  (Monad m, (Reifies s (StateMachine m input stateMachineData (output, stateMachineData))))
-                => p s
+                => proxy s
                 -> RaftData stateMachineData input output
                 -> Entry input
                 -> m ([output]
@@ -469,9 +469,9 @@ catchApplyEntry p st e =
                   | otherwise    ->   applyEntry p  st e
     Nothing -> applyEntry p st e
 
-applyEntries :: forall stateMachineData input output m p s
+applyEntries :: forall stateMachineData input output m proxy s
              .  (Monad m, (Reifies s (StateMachine m input stateMachineData (output, stateMachineData))))
-             => p s
+             => proxy s
              -> Name
              -> RaftData stateMachineData input output
              -> [Entry input]
@@ -486,9 +486,9 @@ applyEntries p h st (e:es) = do
   (out'', state)<- applyEntries p h st' es
   return (out' ++ out'', state)
 
-doGenericServer :: forall stateMachineData input output p s m
+doGenericServer :: forall stateMachineData input output proxy s m
                 . (Monad m, (Reifies s (StateMachine m input stateMachineData (output, stateMachineData))))
-                => p s
+                => proxy s
                 -> Name
                 -> RaftData stateMachineData input output
                 -> m ([RaftOutput output]
@@ -571,12 +571,12 @@ doLeader pk state me =
       Candidate  -> return ([], state,[])
       Follower -> return ([],state,[])
 
-raftNetHandler :: forall stateMachineData input output m p s k
+raftNetHandler :: forall stateMachineData input output m proxy s k
                . (Monad m
                ,  Reifies k (Set Name)
                ,  Reifies s (StateMachine m input stateMachineData (output, stateMachineData)))
-               => p s
-               -> p k
+               => proxy s
+               -> proxy k
                -> Name
                -> Name
                -> Msg input
@@ -617,9 +617,9 @@ handleClientRequest me state client id' c =
     Follower -> ([NotLeader client id'], state, [])
     Candidate -> ([NotLeader client id'], state, [])
 
-handleTimeout :: forall stateMachineData output input p k m
+handleTimeout :: forall stateMachineData output input proxy k m
               . (Reifies k (Set Name), Monad m)
-              => p k
+              => proxy k
               -> Name
               -> RaftData stateMachineData input output
               -> m (Res
@@ -632,9 +632,9 @@ handleTimeout  pk me state =
     Candidate -> tryToBecomeLeader pk  me state
     Follower -> tryToBecomeLeader pk  me state
 
-handleInput :: forall stateMachineData output input p k m
+handleInput :: forall stateMachineData output input proxy k m
             . (Reifies k (Set Name), Monad m)
-            => p k
+            => proxy k
             -> Name
             -> RaftInput input
             -> RaftData stateMachineData input output
@@ -647,12 +647,12 @@ handleInput pk me inp state =
     ClientRequest client id' c -> handleClientRequest me state client id' c
     Timeout -> handleTimeout pk me state
 
-raftInputHandler :: forall stateMachineData input output p s k m
+raftInputHandler :: forall stateMachineData input output proxy s k m
                  . (Monad m
                  ,  Reifies k  (Set Name)
                  ,  Reifies s (StateMachine m input stateMachineData (output, stateMachineData)))
-                 => p s
-                 -> p k
+                 => proxy s
+                 -> proxy k
                  -> Name
                  -> RaftInput input
                  -> RaftData stateMachineData input output
