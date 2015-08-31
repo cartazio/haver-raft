@@ -179,6 +179,7 @@ findAtIndex (e:es) i
   | eIndex e < i  = Nothing
   | otherwise     = findAtIndex es i
 
+-- TODO: Rename to something sane (findMsgsGreaterThan)
 findGtIndex :: [Entry input] -> LogIndex -> [Entry input]
 findGtIndex [] _i = []
 findGtIndex (e:es) i
@@ -503,6 +504,7 @@ doGenericServer p h state = do
            then (out, state'{lastApplied=commitIndex state}, [])
            else (out, state'{lastApplied=lastApplied state}, [])
 
+-- | Distribute AppendEntries msgs
 -- TODO: Convert this to do notation
 replicaMessage :: forall stateMachineData input output
                 . RaftData stateMachineData input output
