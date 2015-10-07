@@ -3,9 +3,9 @@ module Main where
 import Network.Message.Framing
 import Test.Hspec
 import qualified Data.ByteString.Lazy.Char8 as LBSC
-import Data.ByteString.Lazy.Char8 (ByteString)
 import Data.Monoid((<>))
 
+main :: IO ()
 main = hspec $ do
   it "handles split messages" $
     let x =  (Message$ LBSC.pack "hello dotty!")
