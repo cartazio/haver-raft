@@ -7,9 +7,11 @@ module Network.Message.Framing(getSimpleMsg
     ,prependAndGetMessage
     ,putMsg
     ,putMsgGen
+    ,emptyResidue
     ) where
 
 import Control.Monad (unless)
+
 import Data.Int
 import Data.Typeable
 import qualified Data.ByteString.Lazy.Char8 as LBSC
@@ -42,6 +44,9 @@ prependAndGetMessage ::
       -> Either ([Message],Residue)  [Message]
 prependAndGetMessage res bs = runGetL getSimpleMsg $ prependResidue res bs
 
+
+emptyResidue :: Residue
+emptyResidue = Residue mempty
 
 prependResidue :: Residue -> ByteString -> ByteString
 prependResidue (Residue res) bs = DBB.toLazyByteString $ res <> DBB.lazyByteString bs
